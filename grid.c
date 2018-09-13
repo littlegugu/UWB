@@ -53,6 +53,13 @@ double door_y = 0.0;
 double wall_x = 0.0;
 double wall_y = 0.0;
 
+static const char base32_alphabet[32] = {
+        '0', '1', '2', '3', '4', '5', '6', '7',
+        '8', '9', 'b', 'c', 'd', 'e', 'f', 'g',
+        'h', 'j', 'k', 'm', 'n', 'p', 'q', 'r',
+        's', 't', 'u', 'v', 'w', 'x', 'y', 'z',
+};
+
 void split(char * data,double *list);
 double * dot(double * a_mat, double * b_mat,int a_row,int b_row);
 double * mat_pow(double * a_mat,int a_row,int power);
@@ -62,7 +69,7 @@ double min_f(double min_p,double a_num);
 void geohash_grid(void);
 int dichotomy(double * range,double top,double low);
 int init(void);
-char* byGeohash(char* str, int count,int alpha);
+char* binGeohash(char* str, int count,int alpha);
 char* geohash(char *str,int xCount,int yCount,int alpha);
 int main(int argc, char const *argv[])
 {
@@ -76,7 +83,7 @@ int main(int argc, char const *argv[])
     
     // itoa(15, s, 2);
     // printf("%p\n",s);
-    // byGeohash(s,3,4);
+    // byGeinhash(s,3,4);
     // printf("%s\n",s);
     
     getchar();
@@ -124,19 +131,21 @@ void geohash_grid(void)
         alpha = dichotomy(y_range,areas.top_y,areas.low_y);
     }
     // return alpha;    
-    printf("alpha:%d\n",alpha);
+    // printf("alpha:%d\n",alpha);
     double xSize = (areas.top_x-areas.low_x)/pow(2,alpha);
     double ySize = (areas.top_y-areas.low_y)/pow(2,alpha);
-    printf("size:%f,%f\n",xSize,ySize);
-    printf("%f,%f,%f,%f\n",areas.top_x,areas.low_x,areas.top_y,areas.low_y);
+    // printf("size:%f,%f\n",xSize,ySize);
+    // printf("%f,%f,%f,%f\n",areas.top_x,areas.low_x,areas.top_y,areas.low_y);
     double x,y;
     int xCount,yCount;
+    char binStr[GEOLEN];
     for( yCount = 0; yCount < pow(2,alpha); yCount++)
     {
         y = areas.low_y + ySize * yCount;
         for( xCount = 0; xCount < pow(2,alpha); xCount++)
         {
             x = areas.low_x + xSize * xCount;
+            geohash(binStr,xCount,yCount,alpha);
             // printf("x:%f,y:%f\n",x,y);
             // printf("x:%d,y:%d\n",xCount,yCount);
 
@@ -146,11 +155,16 @@ void geohash_grid(void)
     
 }
 
+char * base32(void)
+{
+
+}
+
 char* geohash(char *str,int xCount,int yCount,int alpha)
 {
     char xStr[GEOLEN],yStr[GEOLEN];
-    byGeohash(xStr,xCount,alpha);
-    byGeohash(yStr,yCount,alpha);
+    binGeohash(xStr,xCount,alpha);
+    binGeohash(yStr,yCount,alpha);
     // char str[GEOLEN];
     int j;
     for(int i = 0; i < alpha*2; i++)
@@ -168,7 +182,7 @@ char* geohash(char *str,int xCount,int yCount,int alpha)
 
 }
 
-char* byGeohash(char* str, int count,int alpha)
+char* binGeohash(char* str, int count,int alpha)
 {
     // char str[GEOLEN];
     itoa(count, str, 2);
@@ -178,13 +192,16 @@ char* byGeohash(char* str, int count,int alpha)
         strcpy(tmp,str);
         int diff=alpha-strlen(str);
         printf("%d\n",diff);
-        for(int j = 0; j < diff; j++)
+        for(int i = 0; i < alpha; i++)
         {
-            str[j]='0';
+            if (i<diff) 
+                str[i]='0';
+            else
+                str[i] = tmp[i-diff];
         }
         
-        for(int i = diff; i < alpha; i++)
-            str[i] = tmp[i-diff];
+        // for(int i = diff; i < alpha; i++)
+        //     str[i] = tmp[i-diff];
     }
     str[alpha]='\0';
     return str;
