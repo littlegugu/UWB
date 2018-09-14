@@ -8,22 +8,27 @@
 #include <math.h>
 #include <windef.h>
 #include <windows.h>
+#include <malloc.h>
 
 #define LINE 100
 #define COR_X 0.69
 #define COR_Y 0.94
 #define GEOLEN 20
+#define BASE32_LEN 5
+#define BASE32_LIM 8
+#define BASE32_CODE 10
+#define LENF 8
 
-typedef struct wall{
+typedef struct {
     double top_x;
 	double low_x;
 	double top_y;
 	double low_y;
     int wall_num;
-};
+}wall;
 
-
-typedef struct room{
+// struct wall;
+typedef struct {
     int room_num;
 	int door_num;
     double door_top_x;
@@ -35,14 +40,14 @@ typedef struct room{
     double top_y;
     double low_y;
     wall walls[6];
-};
+}room;
 
-typedef struct area{
+typedef struct {
     double top_x;
     double low_x;
     double top_y;
     double low_y;
-};
+}area;
 
 
 room rooms[5];//声明五个房间
@@ -66,29 +71,91 @@ double * mat_pow(double * a_mat,int a_row,int power);
 // void init(void);
 double max_f(double max_p,double a_num);
 double min_f(double min_p,double a_num);
-void geohash_grid(void);
+int * geohash_grid(void);
 int dichotomy(double * range,double top,double low);
 int init(void);
 char* binGeohash(char* str, int count,int alpha);
 char* geohash(char *str,int xCount,int yCount,int alpha);
+char* base32_encode(char *bin_source,char * code);
+int binToDec(char * binStr);
+char* complement(char * str,int digit);
 int main(int argc, char const *argv[])
 {
 
     init();
-    char s[10];
-    geohash(s,3,4,4);
-    printf("%s\n",s);
-    // geohash_grid();//通过geohash全图画栅格
-    // printf("%d\n",hh);
-    
-    // itoa(15, s, 2);
-    // printf("%p\n",s);
-    // byGeinhash(s,3,4);
-    // printf("%s\n",s);
-    
+    // int * areaGridDec;
+    // areaGridDec = (int *)malloc( 1000 *sizeof(int));
+    // int areaGridDec[] = {0};
+    int *  areaGridDec = geohash_grid();
+    time_t t;
+	t = time(NULL);
+	int ii = time(&t);
+    printf("%d\n",areaGridDec[0]);
+    int jj = time(&t);
+    printf("time:%d\n",jj-ii);
+    printf("areaGridDec:%d byte",_msize(areaGridDec)); 
+    // cout<<_msize(areaGridDec)<<endl;
     getchar();
+    return 0;
 }
 
+
+
+
+
+
+int * geohash_grid(void)
+{
+    //动态计算精度范围
+    double x_range[2]={0,0};//0:下界；1:上界;
+    double y_range[2]={0,0};
+    int alpha=0;//二分次数
+    int xlim,ylim;
+    x_range[0] = wall_x;
+    y_range[0] = wall_y;
+    if(door_x>door_y)
+    {
+        x_range[1] = door_x;
+        alpha      = dichotomy(x_range,areas.top_x,areas.low_x);//通过x范围计算二分次数
+    }
+    else
+    {
+        y_range[1] = door_y;
+        alpha      = dichotomy(y_range,areas.top_y,areas.low_y);//通过y范围计算二分次数
+    }
+    double xSize = (areas.top_x-areas.low_x)/pow(2,alpha);
+    double ySize = (areas.top_y-areas.low_y)/pow(2,alpha);
+    double x,y;
+    int xCount,yCount;
+    char binStr[GEOLEN];
+    char geostr[GEOLEN];
+    int count = 0;
+    int index;
+    int *area_num;
+    int index_lim = (pow(2,alpha))*(pow(2,alpha));
+    area_num = (int *)malloc( index_lim *sizeof(int));
+    // FILE *fp = NULL;
+    // fp = fopen("D:\\program\\UWB\\data\\gridec.txt","w");
+    for( yCount = 0; yCount < pow(2,alpha); yCount++)
+    {
+        y = areas.low_y + ySize * yCount;
+        for( xCount = 0; xCount < pow(2,alpha); xCount++)
+        {
+            x = areas.low_x + xSize * xCount;
+            geohash(binStr,xCount,yCount,alpha);
+            base32_encode(binStr,geostr);
+            index = binToDec(binStr);
+            printf("index:%d\n",index);
+            area_num[index] = 1;
+            // printf("%d\n",index);
+            // fprintf(fp,"x:%f,y:%f == Geohash=%s,decimal base=%d\n",x,y, geostr,binToDec(binStr));
+            // printf("x:%f,y:%f == Geohash=%s,decimal base=%d\n",x,y, geostr,binToDec(binStr));
+        }
+        
+    }
+    // fclose(fp);
+    return area_num;
+}
 
 /*二分法*/
 int dichotomy(double * range,double top,double low)
@@ -103,61 +170,6 @@ int dichotomy(double * range,double top,double low)
         count++;
     }
     return count;
-}
-
-
-
-void geohash_grid(void)
-{
-    //动态计算精度范围
-    double x_range[2]={0,0};//0:下界；1:上界;
-    double y_range[2]={0,0};
-    int alpha=0;//二分次数
-    int xlim,ylim;
-    x_range[0] = wall_x;
-    y_range[0] = wall_y;
-    if(door_x>door_y)
-    {
-        // puts("x");
-        x_range[1] = door_x;
-        //通过x范围计算二分次数
-        alpha = dichotomy(x_range,areas.top_x,areas.low_x);
-    }
-    else
-    {
-        // puts("y");
-        y_range[1] = door_y;
-        //通过y范围计算二分次数
-        alpha = dichotomy(y_range,areas.top_y,areas.low_y);
-    }
-    // return alpha;    
-    // printf("alpha:%d\n",alpha);
-    double xSize = (areas.top_x-areas.low_x)/pow(2,alpha);
-    double ySize = (areas.top_y-areas.low_y)/pow(2,alpha);
-    // printf("size:%f,%f\n",xSize,ySize);
-    // printf("%f,%f,%f,%f\n",areas.top_x,areas.low_x,areas.top_y,areas.low_y);
-    double x,y;
-    int xCount,yCount;
-    char binStr[GEOLEN];
-    for( yCount = 0; yCount < pow(2,alpha); yCount++)
-    {
-        y = areas.low_y + ySize * yCount;
-        for( xCount = 0; xCount < pow(2,alpha); xCount++)
-        {
-            x = areas.low_x + xSize * xCount;
-            geohash(binStr,xCount,yCount,alpha);
-            // printf("x:%f,y:%f\n",x,y);
-            // printf("x:%d,y:%d\n",xCount,yCount);
-
-        }
-        
-    }
-    
-}
-
-char * base32(void)
-{
-
 }
 
 char* geohash(char *str,int xCount,int yCount,int alpha)
@@ -186,24 +198,7 @@ char* binGeohash(char* str, int count,int alpha)
 {
     // char str[GEOLEN];
     itoa(count, str, 2);
-    if (strlen(str)<alpha)
-    {   
-        char tmp[GEOLEN];
-        strcpy(tmp,str);
-        int diff=alpha-strlen(str);
-        printf("%d\n",diff);
-        for(int i = 0; i < alpha; i++)
-        {
-            if (i<diff) 
-                str[i]='0';
-            else
-                str[i] = tmp[i-diff];
-        }
-        
-        // for(int i = diff; i < alpha; i++)
-        //     str[i] = tmp[i-diff];
-    }
-    str[alpha]='\0';
+    complement(str,alpha);
     return str;
 }
 
@@ -223,7 +218,7 @@ int init(void)
     int flags = 0;
     int count = 0;
     double * list;
-    list  = (double *)malloc(sizeof(LINE));
+    list  = (double *)malloc( LINE *sizeof(double));
     int num;
     double top_x  = -10000.0;
     double low_x  = 10000.0;
@@ -241,7 +236,7 @@ int init(void)
 		puts("file reading...");
 		while (fgets(buf,LINE,fp)!=NULL)
 		{
-			puts(buf);
+			// puts(buf);
             if (strlen(buf)<=3)
             {
                 rooms[flags].top_x = top_x;
@@ -305,7 +300,7 @@ int init(void)
     door_y = door_y/flags;
     wall_x = wall_x/count_x;
     wall_y = wall_y/count_y;   
-    fp = fopen("D:\\program\\UWB\\data\\area.txt","r+");
+    fp = fopen("D:\\program\\UWB\\data\\area1.txt","r+");
     
     if (fp!=NULL) {
         fgets(buf,LINE,fp);
@@ -323,106 +318,11 @@ int init(void)
 		fclose(fp);
     }
     fclose(fp);
-    // free(list);
+    free(list);
     free(buf);
     return 0;
 }
 
-// void init(void)
-// {
-//     FILE * fp = NULL;
-// 	char * data;
-// 	data = (char *)malloc(LINE*sizeof(char));
-    
-// 	fp = fopen("D:\\program\\UWB\\data\\room.txt","r+");
-//     if (fp != NULL )
-//     {
-//         int flags = 0;
-//         int count = 0;
-//         double * list;
-//         list  = (double *)malloc(sizeof(LINE));
-//         int num;
-//         double top_x  = -10000.0;
-//         double low_x  = 10000.0;
-//         double top_y  = -10000.0;
-//         double low_y  = 10000.0;
-//         double x;
-//         double y;
-//         int count_x = 0;
-//         int count_y = 0;
-//         while (fgets(data,LINE,fp)!=NULL)
-//         {
-//             puts(data);
-//             if (strlen(data)<=3)
-//             {
-//                 rooms[flags].top_x = top_x;
-//                 rooms[flags].low_x = low_x;
-//                 rooms[flags].top_y = top_y;
-//                 rooms[flags].low_y = low_y;
-//                 flags++;
-//                 count = 0;
-//                 top_x = -10000.0;
-//                 low_x = 10000.0;
-//                 top_y = -10000.0;
-//                 low_y = 10000.0;
-
-//             }
-//             else
-//             {
-//                 split(data,list);
-//                 if (count== 0) {
-//                     rooms[flags].room_num = flags;
-//                     rooms[flags].door_num = (int) list[0];
-//                     rooms[flags].door_top_x = list[1]-COR_X;
-//                     rooms[flags].door_low_x = list[2]-COR_X;
-//                     rooms[flags].door_top_y = list[3]-COR_Y;
-//                     rooms[flags].door_low_y = list[4]-COR_Y;
-//                     door_x += list[1]-list[2];
-//                     door_y += list[3]-list[4];
-
-//                 }
-//                 else {
-//                     num = list[0];
-//                     rooms[flags].walls[num].top_x=list[1]-COR_X;
-//                     rooms[flags].walls[num].low_x=list[2]-COR_X;
-//                     rooms[flags].walls[num].top_y=list[3]-COR_Y;
-//                     rooms[flags].walls[num].low_y=list[4]-COR_Y;
-//                     rooms[flags].walls[num].wall_num = num;
-//                     top_x = max_double(top_x,list[1]-COR_X);
-//                     low_x = min_double(low_x,list[2]-COR_X);
-//                     top_y = max_double(top_y,list[3]-COR_Y);
-//                     low_y = min_double(low_y,list[4]-COR_Y);
-//                     x = list[1]-list[2];
-//                     y = list[3]-list[4];
-//                     // printf("x:y:%f,%f\n",x,y);
-//                     wall_x += x<y ? x:0;
-//                     wall_y += x>y ? y:0;
-//                     count_x +=x<y ? 1:0;
-//                     count_y +=x>y ? 1:0;
-                    
-//                 }
-//                 count++;
-//             }
-//         }
-//         fclose(fp);
-//         door_x = door_x/flags;
-//         door_y = door_y/flags;
-//         wall_x = wall_x/count_x;
-//         wall_y = wall_y/count_y;
-//         //区域
-//         fp = fopen("D:\\program\\UWB\\area1.txt","r+");
-//         if(fp != NULL)
-//         {
-//             fgets(data,LINE,fp);
-//             split(data,list);
-//             area[0]=list[0]-COR_X;
-//             area[1]=list[1]-COR_X;
-//             area[2]=list[2]-COR_Y;
-//             area[3]=list[3]-COR_Y;
-//             // fclose(fp);
-//         }
-//     }
-// }
 
 /*
 * 分割字符串
@@ -509,6 +409,66 @@ double * mat_pow(double * a_mat,int a_row,int power)
     }
 }
 
+char* base32_encode(char *bin_source,char * code)
+{
+	char *tmpchar;
+	int   num;
+	int   count = 0;
+	int   codeDig;
+	// tmpchar     = (char *)malloc(BASE32_LIM);
+    tmpchar   = (char *)malloc( LENF *sizeof(char));
+	complement(bin_source,BASE32_LIM);//不足8位补位
+	for(int i = 0; i < strlen(bin_source) ;  i+=BASE32_LEN)
+	{	
+		strncpy(tmpchar, bin_source+i, BASE32_LEN);
+		tmpchar[BASE32_LEN]= '\0';
+		complement(tmpchar,BASE32_LEN);
+		num           = binToDec(tmpchar);
+		code[count++] = base32_alphabet[num];
+	}
+	if (strlen(bin_source)%5 != 0)
+		codeDig = strlen(bin_source)/5+1;
+	else
+		codeDig = strlen(bin_source)/5;
+	code[codeDig]='\0';
+    free(tmpchar);
+	return code;
+}
+
+int binToDec(char * binStr)
+{
+	int decInt;	
+	int sum   = 0;
+	int j     = strlen(binStr)-1;
+	for(int i = 0; i < strlen(binStr); i++)
+	{
+		decInt =  (int) binStr[i] - '0';
+		sum    += decInt*(pow(2,j--));
+	}
+	return sum;
+}
+
+
+char* complement(char * str,int digit)
+{
+	int st = strlen(str);/*字符串长度*/
+	if(st<digit)
+	{
+		/*不足digit位补位*/
+		int diff = digit-st;
+		char tmp[LENF];
+		strcpy(tmp,str);
+		for(int i = 0; i < digit; i++)
+		{
+			if (i<diff)
+				str[i] = '0';/* 补0 */
+			else
+				str[i] = tmp[i-diff];/* 移位 */
+		}
+		str[digit]='\0';
+	}
+	return str;
+}
 
 
 
