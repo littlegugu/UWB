@@ -18,8 +18,10 @@
 #define BASE32_LIM 8
 #define BASE32_CODE 10
 #define LENF 8
+#define ROOMNUM 2
+#define WALLNUM 6
 
-typedef struct {
+typedef struct wall{
     double top_x;
 	double low_x;
 	double top_y;
@@ -28,7 +30,7 @@ typedef struct {
 }wall;
 
 // struct wall;
-typedef struct {
+typedef struct room{
     int room_num;
 	int door_num;
     double door_top_x;
@@ -39,10 +41,10 @@ typedef struct {
     double low_x;
     double top_y;
     double low_y;
-    wall walls[6];
+    wall walls[WALLNUM];
 }room;
 
-typedef struct {
+typedef struct area{
     double top_x;
     double low_x;
     double top_y;
@@ -50,7 +52,7 @@ typedef struct {
 }area;
 
 
-room rooms[5];//声明五个房间
+room rooms[ROOMNUM];//声明两个房间
 area areas;
 // double area[4];
 double door_x = 0.0;
@@ -79,22 +81,24 @@ char* geohash(char *str,int xCount,int yCount,int alpha);
 char* base32_encode(char *bin_source,char * code);
 int binToDec(char * binStr);
 char* complement(char * str,int digit);
+int getRoomNum(double x,double y);
 int main(int argc, char const *argv[])
 {
 
     init();
-    // int * areaGridDec;
-    // areaGridDec = (int *)malloc( 1000 *sizeof(int));
-    // int areaGridDec[] = {0};
+    
+    // for(int i = 0; i < ROOMNUM; i++)//打印room坐标
+    //     printf("room%d,xtop=%f,xlow=%f,ytop=%f,ylow=%f\n",i,rooms[i].top_x,rooms[i].low_x,rooms[i].top_y,rooms[i].low_y);
+    
     int *  areaGridDec = geohash_grid();
-    time_t t;
-	t = time(NULL);
-	int ii = time(&t);
+    // time_t t;
+	// t = time(NULL);
+	// int ii = time(&t);//计时器
     printf("%d\n",areaGridDec[0]);
-    int jj = time(&t);
-    printf("time:%d\n",jj-ii);
-    printf("areaGridDec:%d byte",_msize(areaGridDec)); 
-    // cout<<_msize(areaGridDec)<<endl;
+    // int jj = time(&t);//计时器
+    // printf("time:%d\n",jj-ii);
+    // printf("areaGridDec:%d byte",_msize(areaGridDec)); //变量内存
+
     getchar();
     return 0;
 }
@@ -130,7 +134,7 @@ int * geohash_grid(void)
     char binStr[GEOLEN];
     char geostr[GEOLEN];
     int count = 0;
-    int index;
+    int index,rN;
     int *area_num;
     int index_lim = (pow(2,alpha))*(pow(2,alpha));
     area_num = (int *)malloc( index_lim *sizeof(int));
@@ -145,8 +149,8 @@ int * geohash_grid(void)
             geohash(binStr,xCount,yCount,alpha);
             base32_encode(binStr,geostr);
             index = binToDec(binStr);
-            printf("index:%d\n",index);
-            area_num[index] = 1;
+            rN    = getRoomNum(x,y);
+            area_num[index] = rN;
             // printf("%d\n",index);
             // fprintf(fp,"x:%f,y:%f == Geohash=%s,decimal base=%d\n",x,y, geostr,binToDec(binStr));
             // printf("x:%f,y:%f == Geohash=%s,decimal base=%d\n",x,y, geostr,binToDec(binStr));
@@ -155,6 +159,61 @@ int * geohash_grid(void)
     }
     // fclose(fp);
     return area_num;
+}
+
+int inWall(double x,double y,double xlim,double ylim,int rN)
+{
+    // double pos[] = {0.0,0.0,0.0,0.0};
+    // int pos_count,i3,i4;
+    int cant = {0,0,0,0,0};
+    for(int wN = 0; wN < WALLNUM; wN++)
+    {
+        if (rooms[rN].walls[wN].low_x<=x+xlim/2 && x+xlim/2<= rooms[rN].walls[wN].top_x)
+        {
+            //x方向不能过
+        }
+        if (rooms[rN].walls[wN].low_y<=y+ylim/2 && y+ylim/2<= rooms[rN].walls[wN].top_y)
+        {
+            //y方向不能过
+        }
+
+        // pos[0] = rooms[rN].walls[wN].top_x-x;
+        // pos[1] = rooms[rN].walls[wN].top_y-x;
+        // pos[2] = x+xlim-rooms[rN].walls[wN].low_x;
+        // pos[3] = y+ylim-rooms[rN].walls[wN].low_y;
+        // if ((pos[2]>=0 && pos[0]-x>0) && (pos[3]>=0 && pos[1]-x>0))
+        // {
+        //     /*x*/
+        //     if (rooms[rN].walls[wN].low_x-x>0 && x + xlim-rooms[rN].walls[wN].top_x>0)
+        //     {
+        //         /*栅格穿墙*/
+        //     }else{
+        //         if(x+xlim/2>)
+        //     }
+        // }        
+    }
+}
+
+int through(double grid, double gridLim,int rN,int wN)
+{
+    if ()
+    {
+        
+    }
+}
+
+
+
+int getRoomNum(double x,double y)
+{
+    for (int rN = 0; rN < ROOMNUM; rN++)
+    {
+        if ((rooms[rN].low_x<=x && rooms[rN].top_x>x) && (rooms[rN].low_y<=y && rooms[rN].top_y>y))
+            // printf("x:%f,y:%f,roomnum:%d\n",x,y,rN);
+            return rN;
+    }
+    // printf("x:%f,y:%f,roomnum:%d\n",x,y,-1);
+    return -1;
 }
 
 /*二分法*/
