@@ -82,11 +82,12 @@ char* base32_encode(char *bin_source,char * code);
 int binToDec(char * binStr);
 char* complement(char * str,int digit);
 int getRoomNum(double x,double y);
+int* inWall(double x,double y,double xSize,double ySize,int rN,int *posList);
 int main(int argc, char const *argv[])
 {
 
     init();
-    
+    puts("ppp");
     // for(int i = 0; i < ROOMNUM; i++)//打印room坐标
     //     printf("room%d,xtop=%f,xlow=%f,ytop=%f,ylow=%f\n",i,rooms[i].top_x,rooms[i].low_x,rooms[i].top_y,rooms[i].low_y);
     
@@ -151,6 +152,15 @@ int * geohash_grid(void)
             index = binToDec(binStr);
             rN    = getRoomNum(x,y);
             area_num[index] = rN;
+            int p[8];
+            inWall(x,y,xSize,ySize,rN,p);
+            printf("%d\n",sizeof(p)/sizeof(int));
+            printf("index:%d,",index);
+            for (int i = 0; i < sizeof(p)/sizeof(int); i++)
+            {
+                printf("%d,",p[i]);
+            }
+            printf("\n");
             // printf("%d\n",index);
             // fprintf(fp,"x:%f,y:%f == Geohash=%s,decimal base=%d\n",x,y, geostr,binToDec(binStr));
             // printf("x:%f,y:%f == Geohash=%s,decimal base=%d\n",x,y, geostr,binToDec(binStr));
@@ -161,46 +171,48 @@ int * geohash_grid(void)
     return area_num;
 }
 
-int inWall(double x,double y,double xlim,double ylim,int rN)
+int* inWall(double x,double y,double xSize,double ySize,int rN,int *posList)
 {
-    // double pos[] = {0.0,0.0,0.0,0.0};
-    // int pos_count,i3,i4;
-    int cant = {0,0,0,0,0};
-    for(int wN = 0; wN < WALLNUM; wN++)
+    if(rN >= 0)
     {
-        if (rooms[rN].walls[wN].low_x<=x+xlim/2 && x+xlim/2<= rooms[rN].walls[wN].top_x)
+        int cant[] = {0,0,0,0,0};
+        for(int wN = 0; wN < WALLNUM; wN++)
         {
-            //x方向不能过
+            // cant = {0,0,0,0,0};
+            if ((rooms[rN].walls[wN].low_x<=x+ xSize && x<=rooms[rN].walls[wN].top_x) &&(rooms[rN].walls[wN].low_y<=y+ ySize && y<=rooms[rN].walls[wN].top_y))
+            {
+                /*栅格与墙有交集*/
+                if(x+(xSize/2)-rooms[rN].walls[wN].top_x<0)
+                    cant[0] = 1;/*0方向，不取等于*/
+                if(y+(ySize/2)-rooms[rN].walls[wN].top_y<=0)
+                    cant[1] = 1;/*1方向，取等于*/
+                if(rooms[rN].walls[wN].low_x-(x+(xSize/2))<=0)
+                    cant[2] = 1;/*2方向，取等于*/
+                if(rooms[rN].walls[wN].low_y-(y+(ySize/2))<0)
+                    cant[3] = 1;/*3方向，不取等于*/            
+            }       
         }
-        if (rooms[rN].walls[wN].low_y<=y+ylim/2 && y+ylim/2<= rooms[rN].walls[wN].top_y)
+        int j = 1;
+        int pos = 4;
+        int count = 0;
+        for (int i = 0; i < 4; i++)
         {
-            //y方向不能过
+            if (i==3)
+                j = 0;
+            if (cant[i]==1)
+            {
+                posList[count++] = i;
+                if(cant[j]==1)
+                    posList[count++] = pos;
+            }
+            pos++;
         }
-
-        // pos[0] = rooms[rN].walls[wN].top_x-x;
-        // pos[1] = rooms[rN].walls[wN].top_y-x;
-        // pos[2] = x+xlim-rooms[rN].walls[wN].low_x;
-        // pos[3] = y+ylim-rooms[rN].walls[wN].low_y;
-        // if ((pos[2]>=0 && pos[0]-x>0) && (pos[3]>=0 && pos[1]-x>0))
-        // {
-        //     /*x*/
-        //     if (rooms[rN].walls[wN].low_x-x>0 && x + xlim-rooms[rN].walls[wN].top_x>0)
-        //     {
-        //         /*栅格穿墙*/
-        //     }else{
-        //         if(x+xlim/2>)
-        //     }
-        // }        
+        return posList;
     }
+    return NULL;
 }
 
-int through(double grid, double gridLim,int rN,int wN)
-{
-    if ()
-    {
-        
-    }
-}
+
 
 
 
@@ -359,7 +371,7 @@ int init(void)
     door_y = door_y/flags;
     wall_x = wall_x/count_x;
     wall_y = wall_y/count_y;   
-    fp = fopen("D:\\program\\UWB\\data\\area1.txt","r+");
+    fp = fopen("D:\\program\\UWB\\data\\area.txt","r+");
     
     if (fp!=NULL) {
         fgets(buf,LINE,fp);
