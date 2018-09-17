@@ -87,7 +87,7 @@ int main(int argc, char const *argv[])
 {
 
     init();
-    puts("ppp");
+    puts("ppp1");
     // for(int i = 0; i < ROOMNUM; i++)//打印room坐标
     //     printf("room%d,xtop=%f,xlow=%f,ytop=%f,ylow=%f\n",i,rooms[i].top_x,rooms[i].low_x,rooms[i].top_y,rooms[i].low_y);
     
