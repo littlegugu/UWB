@@ -179,6 +179,7 @@ struct grid grids[GRID_QUANT];/*栅格数组*/
 struct area areas;
 int alpha;
 double xSize,ySize;
+int area_num[GRID_QUANT];
 
 
 void reconnect()
@@ -1047,9 +1048,9 @@ int * Geohash_Grid(void)
     char geostr[GEO_STR_LEN];
     int count = 0;
     int index,rN;
-    int *area_num;
+    // int *area_num;
     int index_lim = (pow(2,alpha))*(pow(2,alpha));
-    area_num = (int *)malloc( index_lim *sizeof(int));
+    // area_num = (int *)malloc( index_lim *sizeof(int));
     // int *passDire;
     // passDire = (int *)malloc( LINE *sizeof(int));
     // FILE *fp = NULL;
@@ -1137,33 +1138,103 @@ int assignment(int row,int col,int value,int * mat,int all)
 }
 
 
-// int* connectedMatrix(int rN){
-// 	int all  = rooms[rN].grid_num;
-// 	int * mat;
-// 	mat = (int *)malloc(all*all*sizeof(int));
-// 	int i,j,k;
-// 	int i_mat,i_grid;
-// 	for(i = 0; i < all*all; i++)
-//         mat[i] = 0;
-// 	for(i_mat = 0; i_mat < all*all; i_mat++){
-// 		assignment(i_mat,i_mat,1,mat,all );
-// 		i_grid = rooms[rN].grid_list[i_mat];
-// 		if (grids[i_grid].east==0) {
-// 			/* code */
-// 		}
-// 		else if(grids[i_grid].west==0) {
-// 			/* code */
-// 		}
-// 		else {
-// 			/* code */
-// 		}
+/*  输入x,y坐标，输出二进制字符串
+**	@param x doublex
+**	@param y doubley
+*/
+int coorToBin(double x, double y, char *strBin)
+{
+    double x_mid,y_mid;
+    double x_min = areas.low_x;
+    double y_min = areas.low_y;
+    double x_max = areas.top_x;
+    double y_max = areas.top_y;
+    if ((x>=x_min && x<=x_max) && (y>=y_min && y<=y_max))
+    {
+        puts("In area.");
+        for(int i = 0; i < alpha; i++)
+        {
+            y_mid = (y_min + y_max) / 2.0;
+            x_mid = (x_min + x_max) / 2.0;
+            if (x<=x_mid) {
+                strBin[i*2] = '0';/* 左0 */
+                x_max = x_mid;
+            }
+            else {
+                strBin[i*2] = '1';/* 右1 */
+                x_min = x_mid;
+            }
+            if (y<=y_mid) {
+                strBin[i*2+1] = '0';/* 左0 */
+                y_max = y_mid;
+            }
+            else {
+                strBin[i*2+1] = '1';/* 右1 */
+                x_min = x_mid;
+            }
+        }
+        strBin[alpha*2] = '\0';
+        return 0;
+    }else{
+        puts("Out of area!");
+        return 1;
+    }     
+}
+
+int CoortoDec(int x , int y){
+	str[GEO_BIN_LEN];
+	if (coorToBin(x,y,str)==0) {
+		return BintoDec(str);
+	}else {
+		return -1 ;
+	}
+}
+
+int CheckArea(int dec){
+	
+	if (dec<0) {
+		return -1;
+	}
+	else {
+		return area_num[dec];
+	}
+	
+}
+
+
+int* connectedMatrix(int rN){
+	int all  = rooms[rN].grid_num;
+	int * mat;
+	mat = (int *)malloc(all*all*sizeof(int));
+	int i,j,k;
+	int i_mat,i_grid,j_grid;
+	for(i = 0; i < all*all; i++)
+        mat[i] = 0;
+	for(i_mat = 0; i_mat < all*all; i_mat++){
+		assignment(i_mat,i_mat,1,mat,all );
+		i_grid = rooms[rN].grid_list[i_mat];
+		if (grids[i_grid].east==0) {
+			j_grid = CoortoDec(grids[i_grid].x-xSize,grids[i_grid].y);
+			if(CheckArea(j_grid)==rN){
+				if ()
+				{
+					
+				}
+			}
+		}
+		else if(grids[i_grid].west==0) {
+			/* code */
+		}
+		else {
+			/* code */
+		}
 		
 
-// 	}
-// }
+	}
+}
 
 
-int* connectedMatrix(int rN)
+int* connectedMatrix1(int rN)
 {
     int all = rooms[rN].grid_num;
     // int mat[all*all];
