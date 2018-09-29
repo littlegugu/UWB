@@ -1200,7 +1200,7 @@ int CheckArea(int dec){
 	}
 	
 }
-
+ss
 
 int* connectedMatrix(int rN){
 	int all  = rooms[rN].grid_num;
