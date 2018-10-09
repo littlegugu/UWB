@@ -18,10 +18,8 @@
 #define Y_MAX 100	 /* 平面图y最大值 */ 
 #define SMO_MAX_NUM 10	/* 准平稳条数 */ 
 #define SP_LIM 5	// 速度	 
-#define A 20 	//geoHash二分次数 
-#define same_lim 3//字符串前n位相同不查 
 #define LINE 30     /*txt文件行最大长度*/
-#define ROOM_QUANT 3 /*房间区域数量*/
+#define ROOM_QUANT 2 /*房间区域数量*/
 #define WALL_QUANT 4 /*房间内墙体数量*/
 #define COR_X 0.69/*修正x*/
 #define COR_Y 0.94/*修正y*/
@@ -31,12 +29,23 @@
 #define BASE32_MIN_LEN 8 /*BASE32每层网络的字符长度，多少个二进编码为一个字符*/
 #define GRID_QUANT 60000 /*栅格数量*/
 #define STEP 30 /*步数*/
+#define SMO_SIZE 10
+#define TIME_LIM 10
+#define ROUTE_QUANT 6
+#define SPEED_LIM 4
 
 static const char base32_alphabet[32] = {
         '0', '1', '2', '3', '4', '5', '6', '7',
         '8', '9', 'b', 'c', 'd', 'e', 'f', 'g',
         'h', 'j', 'k', 'm', 'n', 'p', 'q', 'r',
         's', 't', 'u', 'v', 'w', 'x', 'y', 'z',
+};
+
+/*路由表*/
+typedef struct Route{
+	int SourAddr;
+	int TargAddr;
+	double dist;
 };
 
 /* 可达区域 */ 
@@ -56,36 +65,41 @@ typedef struct HashNode{
 };
 
 /*准平稳段*/
-typedef struct smo{
+typedef struct Smo{
 	double x;//当前
 	double y;
+	double dt;
 	long int t;
 };
 
+
+
 /*手环缓存区*/
 typedef struct Tag{
-	char *id;	/* 手环编号 */ 
+	char *id = NULL;	/* 手环编号 */ 
 	double cur_x;	//当前x 
 	double cur_y;	// 当前y 
 	long int cur_t;	//当前数据时间 
 	char *cur_grid;	//当前区域编号 
 	double pri_x;	//上一x 
 	double pri_y;	//上一y 
-	long int pri_t;	//上一次的时间 
-	char *pri_grid;	//上一次的区域编号 
-	int is_smo=0;	//是否平稳， 1为平稳，0为非平稳 
-	smo smo_li[10];		//10条准平稳数据 
-	int smo_num=0;	//已存放平稳数据,若为0则表示该手环没初始化过 
+    long long pri_t;	//上一时间
+    char *pri_grid;	//上一区域编号
+    int is_smo=0;	//是否平稳， 1为平稳，0为非平稳 
+    struct Smo smo_li[SMO_SIZE];		//10条准平稳数据 
+    int smo_num=0;	//已存放平稳数据,若为0则表示该手环没初始化过 
+    int cur_decGrid; 
+    int pri_decGrid;
 };
 
-typedef struct wall{
+typedef struct Wall{
     double top_x;
 	double low_x;
 	double top_y;
 	double low_y;
 };
 
-typedef struct room{
+typedef struct Room{
     int room_num;/*房间区域序号*/
 	int door_pos;/*门的位置*/
 	int room_type;/*房间类型，0标准房间区域，1非标准房间区域，2不可通行房间区域*/
@@ -99,19 +113,19 @@ typedef struct room{
     double low_x;
     double top_y;
     double low_y;
-    struct wall walls[WALL_QUANT];
+    struct Wall walls[WALL_QUANT];
 	int grid_num;/*房间内栅格数量*/
 	int grid_list[300];
 };
 
-typedef struct area{
+typedef struct Area{
     double top_x;
     double low_x;
     double top_y;
     double low_y;
 };
 
-typedef struct grid{
+typedef struct Grid{
     int numDec;
     char numStr[GEO_STR_LEN];
     int east;
@@ -125,10 +139,6 @@ typedef struct grid{
     /*数组下标作为房间区域内的编号*/
 };
 
-// typedef struct areaGrid{
-//     struct grid areaGridArr[GRID_QUANT];
-//     int index = 0;//初始化后长度
-// }areaGrid;
 
 typedef struct Elem{
 	char *elem;
@@ -161,8 +171,8 @@ int SEND_PORT; 	//发送端口
 char *SEND_ADDR;	//发送地址
 int THREAD_NUM;	//工作线程数 
 /* 全局变量 */ 
-/* 手环数组 */ 
-Tag tags[TAG_SIZE];
+
+
 /* 当前拥有的哈希节点数目 */ 
 int hash_table_size;
 HashNode* hashTable[HASH_MAX_SIZE];
@@ -174,12 +184,16 @@ pthread_mutex_t access_lock;
 static SOCKET tcp_client;
 /* 用于存储服务器的基本信息 */
 static struct sockaddr_in tcp_server_in;
-struct room rooms[ROOM_QUANT];/*房间区域数组*/
-struct grid grids[GRID_QUANT];/*栅格数组*/
-struct area areas;
+struct Room rooms[ROOM_QUANT];/*房间区域数组*/
+struct Grid grids[GRID_QUANT];/*栅格数组*/
+struct Area areas;
+struct Tag tags[TAG_SIZE];/* 手环数组 */ 
 int alpha;
 double xSize,ySize;
 int area_num[GRID_QUANT];
+int now_tag = 0;
+struct Route route_table[ROUTE_QUANT];/*路由表数组*/
+
 
 
 void reconnect()
@@ -205,6 +219,41 @@ void reconnect()
     send(tcp_client, "connect", strlen("connect"), 0);
 }         
 
+double Distf(double x1,double y1,double x2,double y2){
+	return pow((pow((x1-x2),2)+pow((y1-y2),2)),0.5);
+}
+
+int Init_Route(void){
+	int i,j,count = 0;
+	
+	for (i = 0; i < ROOM_QUANT; i++)
+	{
+		for (j = 0; j < ROOM_QUANT; j++)
+		{
+			if (i != j)
+			{
+				route_table[count].SourAddr = i;
+				route_table[count].TargAddr = j;
+				route_table[count].dist = Distf(rooms[i].door_cer_x,rooms[i].door_cer_y,rooms[j].door_cer_x,rooms[j].door_cer_y);/*待改*/
+				count++;
+			}
+		}
+	}
+}
+
+double Search_Route(int rN1,int rN2){
+	int i;
+	for(i = 0; i < ROUTE_QUANT; i++)
+	{
+		if ((route_table[i].SourAddr == rN1 && route_table[i].TargAddr ==rN2) || 
+		(route_table[i].SourAddr == rN2 && route_table[i].TargAddr ==rN1))
+		{
+			return route_table[i].dist;
+		}
+	}
+	return 0.0;
+}
+
 void Init_HashTable()
 {
 	hash_table_size = 0;
@@ -228,72 +277,6 @@ unsigned int hash(const char *str)
 	return h;
 }
 
-/* 哈希表插入 */ 
-void hash_insert(const char* key,char *accessKey,int accessTime)
-{
-	if(hash_table_size == HASH_MAX_SIZE)
-	{
-		printf("out of memory! \n");
-		return;
-	}
-	
-	unsigned int pos = hash(key)%HASH_MAX_SIZE;
-	
-	HashNode *hashNode = hashTable[pos];
-	
-	int flag = 1;	/* 1为新，0为旧*/ 
-	while(hashNode)
-	{
-		if(strcmp(hashNode->key,key)==0)
-		{//已有节点 
-			flag = 0;
-			break;
-		}
-		hashNode = hashNode->next;
-	}
-	
-	/* 创建新的节点 */ 
-	if(flag)
-	{
-		printf("不存在键%s \n",key);
-		HashNode *newNode = (HashNode *)malloc(sizeof(HashNode));
-		memset(newNode,0,sizeof(HashNode));
-		newNode->key = (char *)malloc(sizeof(char)*(strlen(key)+1));
-		strcpy(newNode->key,key);
-		
-		Access *accessNode = (Access *)malloc(sizeof(Access));
-		accessNode->key = (char *)malloc(sizeof(char)*(strlen(accessKey)+1));
-		strcpy(accessNode->key,accessKey);
-		accessNode->time = accessTime;
-		accessNode->next = NULL;
-		newNode->access = accessNode;
-		newNode->accessRear = accessNode;
-		
-		newNode->next = hashTable[pos];
-		hashTable[pos] = newNode;
-		hash_table_size++;
-	}
-	
-	/* 在原有节点上操作 */ 
-	else
-	{
-		printf("已有键%s \n",key);
-		Access *accessNode = (Access *)malloc(sizeof(Access));
-		accessNode->key = (char *)malloc(sizeof(char)*(strlen(accessKey)+1));
-		strcpy(accessNode->key,accessKey);
-		accessNode->time = accessTime; 
-		accessNode->next = NULL;
-		
-		/* 附加到原有的可达区域节点后面 */
-		Access *p;
-		p = hashNode->accessRear;
-		p->next = accessNode;
-		hashNode->accessRear = accessNode;
-	}
-	
-	printf("The size of HashTable is %d now! \n",hash_table_size);
-} 
-
 /* 哈希表搜索 */ 
 HashNode *hash_search(const char *key)
 {
@@ -313,6 +296,90 @@ HashNode *hash_search(const char *key)
 	
 	return NULL;
 }
+
+/* 哈希表插入 */ 
+void hash_insert(const char* key,char *accessKey,int accessTime)
+{
+    if(hash_table_size == HASH_MAX_SIZE)
+    {
+        printf("out of memory! \n");
+        return;
+    }
+    
+    unsigned int pos = hash(key)%HASH_MAX_SIZE;
+    
+    HashNode *hashNode = hashTable[pos];
+    
+    int flag = 1;	/* 1为新，0为旧*/
+    while(hashNode)
+    {
+        if(strcmp(hashNode->key,key)==0)
+        {//已有节点 
+            flag = 0;
+            break;
+        }
+        hashNode = hashNode->next;
+    }
+    
+    /* 创建新的节点 */
+    if(flag)
+    {
+        printf("Not exist:%s ! \n",key);
+        HashNode *newNode = (HashNode *)malloc(sizeof(HashNode));
+        memset(newNode,0,sizeof(HashNode));
+        newNode->key = (char *)malloc(sizeof(char)*(strlen(key)+1));
+        strcpy(newNode->key,key);
+        
+        Access *accessNode = (Access *)malloc(sizeof(Access));
+        accessNode->key = (char *)malloc(sizeof(char)*(strlen(accessKey)+1));
+        strcpy(accessNode->key,accessKey);
+        accessNode->time = accessTime;
+        accessNode->next = NULL;
+        newNode->access = accessNode;
+        
+        newNode->next = hashTable[pos];
+        hashTable[pos] = newNode;
+        hash_table_size++;
+    }
+    
+   /* 在原有节点上操作 */ 
+    else
+    {
+        printf("Already has key:%s ! \n",key);
+        Access *as = hash_search(key)->access;
+        int asflag = 1;
+        while (as)
+        {
+            if (strcmp(as->key,accessKey) != 0)
+            {
+                asflag = 0;
+                break;
+            }
+            as = as->next;
+        }
+        if(asflag==0)
+        {
+            Access *accessNode = (Access *)malloc(sizeof(Access));
+            accessNode->key = (char *)malloc(sizeof(char)*(strlen(accessKey)+1));
+            strcpy(accessNode->key,accessKey);
+            accessNode->time = accessTime; 
+            accessNode->next = NULL;
+            
+           /* 附加到原有的可达区域节点后面 */
+            Access *p;
+            p = hashNode->access;
+            while(p->next)
+            {
+                p = p->next;	
+            }
+            p->next = accessNode;
+        }
+    }
+    
+    printf("The size of HashTable is %d now! \n",hash_table_size);
+} 
+
+
 
 
 /* 打印整个哈希表 测试用 */ 
@@ -340,325 +407,393 @@ void display_hash_table()
 	}	
 } 
 
-// char* base32_encode(char *bin_source)
-// {
-//     int i;
-//     int j = 0;
-//     static char str[20];
-
-//     for(i=0;i<strlen(bin_source);++i){
-//         if((i+1)%5==0){
-//             j++;
-//             int num = (bin_source[i]-'0')+(bin_source[i-1]-'0')*2\
-//             +(bin_source[i-2]-'0')*2*2+(bin_source[i-3]-'0')*2*2*2\
-//             +(bin_source[i-4]-'0')*2*2*2*2;
-
-//             str[j-1] = base32_alphabet[num];
-//         }
-
-//     }
-//     return str;
-// }
-
-
-// /* geohash编码 
-// **	@param x double,坐标x
-// **	@param y double,坐标y
-// **  @param a int,精度 
-// */
-// char* GeoHash(double x, double y,int a)
-// {
-//     double x_mid,y_mid;
-//     char x_ans[a];
-//     char y_ans[a];
-    
-//     char ans[2*a+1];
-//     double x_min = X_MIN,y_min = Y_MIN;
-//     double x_max = X_MAX,y_max = Y_MAX;
-    
-//     int i,j;
-    
-//     for(i=0;i<a;i++){
-//         y_mid = (y_min + y_max) / 2.0;
-//         x_mid = (x_min + x_max) / 2.0;
-        
-//         /* 左边编码0，右边编码1 */ 
-//         if(x - x_mid >= 0) 
-//         {
-//         	x_ans[i] = '1';
-// 			x_min = x_mid;
-// 		}	
-//         else
-// 		{
-// 			x_ans[i] = '0';
-// 			x_max = x_mid;
-// 		} 
-		   
-//         if(y - y_mid >= 0) 
-//         {
-//         	y_ans[i] = '1';
-// 			y_min = y_mid;
-// 		}	
-//         else
-// 		{
-// 			y_ans[i] = '0';
-// 			y_max = y_mid;
-// 		} 
-        
-//     }
-
-//     //将两个坐标进行合并，组合为一个二进制编码
-//     /* 奇位是y，偶位是x */
-//     int k;
-//     for(j=0,k=0;j<a;j++) 
-// 	{
-// 		ans[k] = x_ans[j];
-// 		k +=2;
-//     }
-    
-//     for(j=0,k=1;j<a;j++) 
-// 	{
-// 		ans[k] = y_ans[j];
-// 		k +=2;
-//     }
-
-// 	ans[2*a] = '\0';
-	
-// 	printf("%s \n",ans);
-	
-//     return base32_encode(ans);
-// }
 
 
 /* 求速度 */ 
-float  speed(smo s1,smo s2)
+// float  speed(smo s1,smo s2)
+// {
+// 	float diff_time = (s2.t-s1.t)/1000.0;
+// 	float dist = pow(pow(s1.x-s2.x,2.0)+pow(s1.y-s2.y,2.0),0.5);
+// 	float sp = dist/diff_time;
+// 	return sp;
+// }
+double speed(double dist,double dt){
+    if (dt==0 and dist != 0)
+    {
+        return dist;
+    }else if  (dt==0 and dist == 0){
+        return 1;
+    }else
+        return dist/dt;
+}
+
+double dists(Smo s1,Smo s2){
+    return (double) (pow(pow(s1.x-s2.x,2.0)+pow(s1.y-s2.y,2.0),0.5));
+}
+
+/*二进制转十进制*/
+int binToDec(char * binStr)
 {
-	float diff_time = (s2.t-s1.t)/1000.0;
-	float dist = pow(pow(s1.x-s2.x,2.0)+pow(s1.y-s2.y,2.0),0.5);
-	float sp = dist/diff_time;
-	return sp;
+    int decInt;	
+    int sum   = 0;
+    int j     = strlen(binStr)-1;
+    for(int i = 0; i < strlen(binStr); i++)
+    {
+        decInt =  (int) binStr[i] - '0';
+        sum    += decInt*(pow(2,j--));
+    }
+    return sum;
+}
+
+/*  输入x,y坐标，输出二进制字符串
+**	@param x doublex
+**	@param y doubley
+*/
+int coorToBin(double x, double y, char *strBin)
+{
+    double x_mid,y_mid;
+    double x_min = areas.low_x;
+    double y_min = areas.low_y;
+    double x_max = areas.top_x;
+    double y_max = areas.top_y;
+    if ((x>=x_min && x<=x_max) && (y>=y_min && y<=y_max))
+    {
+        // puts("In area.");
+        for(int i = 0; i < alpha; i++)
+        {
+            y_mid = (y_min + y_max) / 2.0;
+            x_mid = (x_min + x_max) / 2.0;
+            if (x<=x_mid) {
+                strBin[i*2] = '0';/* 左0 */
+                x_max = x_mid;
+            }
+            else {
+                strBin[i*2] = '1';/* 右1 */
+                x_min = x_mid;
+            }
+            if (y<=y_mid) {
+                strBin[i*2+1] = '0';/* 左0 */
+                y_max = y_mid;
+            }
+            else {
+                strBin[i*2+1] = '1';/* 右1 */
+                x_min = x_mid;
+            }
+        }
+        strBin[alpha*2] = '\0';
+        return 0;
+    }else{
+        puts("Out of area!");
+        return 1;
+    }     
+}
+
+/*补位*/
+char* complement(char * str,int digit)
+{
+	int st = strlen(str);/*字符串长度*/
+	if(st<digit)
+	{
+		/*不足digit位补位*/
+		int diff = digit-st;
+		char *tmp;
+		tmp = (char *)malloc(digit*sizeof(char));
+		strcpy(tmp,str);
+		for(int i = 0; i < digit; i++)
+		{
+			if (i<diff)
+				str[i] = '0';/* 补0 */
+			else
+				str[i] = tmp[i-diff];/* 移位 */
+		}
+		str[digit]='\0';
+		free(tmp);
+		tmp = NULL;
+	}
+
+	return str;
+}
+
+
+/*用base32将二进制字符串转成字符串*/
+char* base32_encode(char *bin_source,char * code)
+{
+    char *tmpchar;
+    int   num;
+    int   count = 0;
+    int   codeDig;
+    tmpchar   = (char *)malloc( BASE32_LAY_LEN *sizeof(char));
+    complement(bin_source,BASE32_MIN_LEN);/*若二进制字符串长度小于8，补位*/
+    for(int i = 0; i < strlen(bin_source) ;  i+=BASE32_LAY_LEN)
+    {	
+        strncpy(tmpchar, bin_source+i, BASE32_LAY_LEN);
+        tmpchar[BASE32_LAY_LEN]= '\0';
+        complement(tmpchar,BASE32_LAY_LEN);/*若最后一层字符串长度小于5，补位*/
+        num           = binToDec(tmpchar);
+        code[count++] = base32_alphabet[num];
+    }
+    if (strlen(bin_source)%5 != 0)
+        codeDig = strlen(bin_source)/5+1;
+    else
+        codeDig = strlen(bin_source)/5;
+    code[codeDig]='\0';
+    free(tmpchar);
+    return code;
 }
 
 /* 判断手环数据是否平稳 
 ** @param tag_pos int,手环在手环数组的下标 
 */
-void is_steady(int tag_pos)
+int is_steady(int tag_pos)
 {
-	printf("it's is_steady! \n");
-	/* 如果判断已经平稳则修改tags[i].is_smo=1 */ 
-	if(tags[tag_pos].smo_num<10)
-	{//数据少于10，不做 
-		printf("smo_num < 10! \n"); 
-	}
-	else
-	{
-		int i;
-		int count=0;
-		tags[tag_pos].is_smo=1;
-		for(i=1;i<SMO_MAX_NUM;i++)
-		{
-			float sp = speed(tags[tag_pos].smo_li[i-1],tags[tag_pos].smo_li[i]);
-			if(sp<SP_LIM)
-			{
-				count++;
-				if(count==7)
-				{	/* 多余7条平稳记录，即判定平稳 修改平稳字段*/ 
-					tags[tag_pos].is_smo=1;
-					printf("手环已稳定...\n");
-					break;
-				}
-			}
-		}
-	}
-	
+    int i;
+    int count=0;
+    double sp,dt;
+    char binstr[alpha*2 + 1];
+    for(i=1;i<SMO_MAX_NUM;i++)
+    {
+        // speed(tags[tag_pos].smo_li[i-1].dt)
+        double sp = speed(dists(tags[tag_pos].smo_li[i-1],tags[tag_pos].smo_li[i]),
+        tags[tag_pos].smo_li[i-1].dt);
+        if(sp<SP_LIM)
+        {
+            count++;
+            if(count==7)
+            {	
+                printf("手环%s准平稳数组内已经有7条平稳数据\n",tags[tag_pos].id);
+                tags[tag_pos].is_smo=1;
+                if(coorToBin(tags[tag_pos].cur_x,tags[tag_pos].cur_y,binstr)==1){
+					printf("手环%s准平稳数组内最后一条数据不在可通行范围内，重新寻找平稳段\n",tags[tag_pos].id);
+                    tags[tag_pos].is_smo=0;
+                    tags[tag_pos].smo_num = 0;
+                    return 1;
+                }
+                else {
+					printf("手环%s已经平稳\n",tags[tag_pos].id);
+                    tags[tag_pos].cur_decGrid = binToDec(binstr);
+					tags[tag_pos].cur_grid = (char *)malloc(GEO_STR_LEN*sizeof(char));
+					tags[tag_pos].pri_grid = (char *)malloc(GEO_STR_LEN*sizeof(char));
+                    base32_encode(binstr,tags[tag_pos].cur_grid);
+                    return 0;
+                }
+                
+
+            }
+        }
+    }
+    printf("/n");
+    tags[tag_pos].smo_num = 0;
+    return 1;
 }
 
-/* 判断漂移算法 
-** @param tag_pos int,手环在手环数组的下标 
-** return confidentDegree int,该条记录的置信度 
-*/
-// float drift(int tag_pos)
-// {
-// 	int i1;
-// 	int i2;
-// 	int flag = 1;
-// 	for(i1=0;i1<=same_lim;i1++)
-// 	{
-// 		if(tags[tag_pos].cur_grid[i1] != tags[tag_pos].pri_grid[i1])
-// 		{
-// 			flag = 0;
-// 			printf("not nithboor area....\n");
-// 			break;
-// 		}
-// 	}
-	
-// 	/* 前n位一样不用查表，代表邻近区间 */ 
-// 	if(flag)
-// 	{
-// 		printf("neithboor area...\n");
-// 		return 1.0;
-// 	}
-// 	else
-// 	{
-// 		HashNode *hns = hash_search(tags[tag_pos].pri_grid);
-// 		if(hns!=NULL)
-// 		{
-// 			Access *p = hns->access; 
-		
-// 			printf("search access area...\n");
-			
-// 			while(p)
-// 			{
-// 				if(strcmp(p->key,tags[tag_pos].cur_grid)==0)
-// 				{
-// 					if(p->time >= tags[tag_pos].cur_t)
-// 					{
-// 						return 1.0;
-// 					}
-// 					else
-// 					{
-// 						float conf;
-// 						conf= (tags[tag_pos].cur_t-p->time)/(5-p->time);
-// 						return conf;
-// 					}
-// 				}
-// 				p=p->next;
-// 			}	
-// 		}
-// 		else
-// 		{
-// 			printf("错误，手环所在区域不在可达表中.... \n");
-// 		}
-		
-// 	}
-	
-// 	return 0.0;
-// }  
 
-/* 解析传来的字符串 */ 
-char *resolve_str(char *data)
-{
-	/* 用cJSON解析 */ 
-	cJSON *json = cJSON_Parse(data);
-	if(json)	//解析成功 
-	{
-		/* 判断是否已初始化该手环，0为无，1为有 */ 
-		int flag = 0;
-		/* 手环在手环数组里的下标 */ 
-		int i;	
-		/* 解析数据 */ 
-		char *id = cJSON_GetObjectItem(json, "tagid")->valuestring;	/* id */ 
-		double x = cJSON_GetObjectItem(json, "x")->valuedouble;	/* 坐标x */ 
-		double y = cJSON_GetObjectItem(json, "y")->valuedouble;	/* 坐标y */ 
-		char *time_str = cJSON_GetObjectItem(json, "time")->valuestring;	/* 时间 */ 
-		long int time = atol(time_str);
+/*时间戳处理*/
+long long timestamp(char * time_str){
+    int i,j,count;
+    int num[7];
+    struct tm stm; 
+    char decos[]   = "- :.";
+    char deco[]    = "a";
+    char *re       = NULL;
+    char *str      = time_str;
+    int list[]     = {2,1,2,1};
+    int time_count = 0;
+    int all_count  = 0;
+    memset(&stm,0,sizeof(stm)); 
+    for (i = 0; i < strlen(decos); i++)
+    {
+        count = 0;
+        deco[0] = decos[i];
+        re = strtok(str,deco);
+        while(re != NULL){
+            if((count<list[i]) or ((i==(strlen(decos)-1))and count==list[i]))
+            {
+                num[all_count++] = atoi(re);
+            }else{
+                str = re;
+            }
+            re = strtok(NULL,deco);
+            count++;
+        }
+    }
+    stm.tm_year  = num[0]-1900;  
+    stm.tm_mon   = num[1]-1;  
+    stm.tm_mday  = num[2];  
+    stm.tm_hour  = num[3];  
+    stm.tm_min   = num[4];  
+    stm.tm_sec   = num[5];
+    long long t1 = (long long)mktime(&stm)*1000+num[6];
+    return t1;
+}
+
+
+
+
+
+
+
+float drift(int tag_pos,int dt){
+    int area_cur = area_num[tags[tag_pos].cur_decGrid];
+    int area_pri = area_num[tags[tag_pos].cur_decGrid];
+    char * key   = tags[tag_pos].pri_grid;
+    char * askey = tags[tag_pos].cur_grid;
+    if(area_cur < 0 || area_pri < 0 ){
+        return 0.0;
+    }else if(area_cur == area_pri){
+        Access *as = hash_search(key)->access;
+        while (as)
+        {
+            if (strcmp(as->key,askey) == 0)
+            {
+                if (as->time >= dt)
+                    return 1;
+                else 
+                    return 0.2;
+            }
+            as = as->next;
+        }
+    }else{
+		double sp = Search_Route(area_cur,area_pri)/dt;
 		
-		/* 在手环数组寻找手环 */ 
-		for(i=0;i<TAG_SIZE;i++)
-		{
-			if(tags[i].smo_num == 0)
-				break;
-			
-			if(strcmp(tags[i].id,id)==0)
-			{
-				//若存在则跳出 
-				flag = 1;
-				break;		
-			} 
+		if (sp<=SPEED_LIM) {
+			return 1;
+		}
+		else {
+			return 0;
 		}
 		
-		printf("该手环在数组的下标是：%d \n",i);
-		
-		/* 不存在的时候，进行初始化 */ 
-		// if(!flag)
-		// {
-		// 	/* 为id开辟空间 */
-		// 	printf("-------正在为手环%s初始化------- \n",id);
-		// 	tags[i].id = (char *)malloc(strlen(id));
-		// 	strcpy(tags[i].id,id);
-			
-		// 	tags[i].cur_x = tags[i].pri_x = x;
-		// 	tags[i].cur_y = tags[i].pri_y = y;
-		// 	tags[i].cur_t = tags[i].pri_t = time;
-		// 	tags[i].smo_li[0].x = x;
-		// 	tags[i].smo_li[0].y = y;
-		// 	tags[i].smo_num = 1;
-			 
-		// 	/* 得到区域编码，使用geohash */
-		// 	// char *geoHash = GeoHash(x,y,A);
-		// 	tags[i].cur_grid = (char *)malloc(strlen(geoHash)+1);
-		// 	tags[i].pri_grid = (char *)malloc(strlen(geoHash)+1);
-		// 	strcpy(tags[i].cur_grid,geoHash);
-		// 	strcpy(tags[i].pri_grid,geoHash);
-			
-		// 	printf("初始化%s ,所在区域是%s \n",tags[i].id,tags[i].cur_grid); 
-		// }
-		// else
-		// {/* 如果手环已经在数组里面 */
-		// 	printf("该手环已经存在！ \n");
-		// 	/* 
-		// 	** 先判断手环是不是已经平稳（即字段is_smo是否等于1） 
-		// 	** 如果手环没有平稳，则进入判断是否平稳的函数
-		// 	** 如果手环已经平稳，则进入判断是否漂移的函数 
-		// 	*/ 
-			
-		// 	/* 修改数据 将上一条记录改成当前条，当前条更新为读取的数据*/
-		// 	tags[i].pri_x = tags[i].cur_x;
-		// 	tags[i].pri_y = tags[i].cur_y;
-		// 	tags[i].pri_t = tags[i].cur_t;
-		// 	strcpy(tags[i].pri_grid,tags[i].cur_grid);
-			
-		// 	tags[i].cur_x = x;	tags[i].cur_y = y;
-		// 	tags[i].cur_t = time;	
-		// 	strcpy(tags[i].cur_grid,GeoHash(x,y,A));
-		// 	printf("手环%s当前位置为%s \n",tags[i].id,tags[i].cur_grid);
-			
-		// 	/* 如果手环不平稳 */
-		// 	if(tags[i].is_smo==0)
-		// 	{
-		// 		/* 先处理更新数据 */ 
-		// 		/* 如果里面准平稳段数据少于10 数据直接在最后面加*/
-		// 		if(tags[i].smo_num<SMO_MAX_NUM)
-		// 		{
-		// 			tags[i].smo_li[tags[i].smo_num].x = x;
-		// 			tags[i].smo_li[tags[i].smo_num].y = y;	
-		// 			tags[i].smo_li[tags[i].smo_num].t = time;
-		// 			tags[i].smo_num++;
-		// 		}
-		// 		else
-		// 		{/*如果已经有10条了 清空第1条 将本次更新数据到最后一条*/ 
-		// 			for(int j=1;j<SMO_MAX_NUM;j++)
-		// 			{//前挪一条记录 
-		// 				tags[i].smo_li[j-1].x = tags[i].smo_li[j].x;
-		// 				tags[i].smo_li[j-1].y = tags[i].smo_li[j].y;
-		// 				tags[i].smo_li[j-1].t = tags[i].smo_li[j].t;
-		// 			}
-		// 			tags[i].smo_li[SMO_MAX_NUM-1].x = x;
-		// 			tags[i].smo_li[SMO_MAX_NUM-1].y = y;
-		// 			tags[i].smo_li[SMO_MAX_NUM-1].t = time;
-		// 		}
-				
-		// 		/* 进入判断是否平稳函数 只需要将手环下标传进去*/
-		// 		is_steady(i);
-		// 		printf("准平稳数据条数:%d \n",tags[i].smo_num);	
-		// 	}
-		// 	else
-		// 	{/* 如果手环已经平稳进入到漂移算法 */ 
-		// 		printf("Enter drift....\n");
-		// 		float confidentDegree = drift(i);
-		// 		cJSON_AddNumberToObject(json,"cd",confidentDegree);
-		// 		char *jsonStr = cJSON_Print(json);
-				
-		// 		printf("置信度%.2f \n",confidentDegree);
-		// 		return jsonStr;	
-		// 	} 
-		// }
-		
-	
-	}
-	
-	return NULL;
-} 
+        return 0;
+    }
+
+}
+
+
+/* 解析传来的字符串 */ 
+char * resolve_str(char *data)
+{
+    /* 用cJSON解析 */ 
+    cJSON *json = cJSON_Parse(data);
+    if(json)	//解析成功  
+    {
+        int flag = 0;/* 判断是否已初始化该手环，0为无，1为有 */
+        int i,nn;/* i:手环在手环数组里的下标 */ 	
+        double dt;/*时间差*/
+        double confidentDegree;/*置信度*/
+        /* 解析数据 */
+        char *id = cJSON_GetObjectItem(json, "tagid")->valuestring;	/* id */ 
+        double x = cJSON_GetObjectItem(json, "x")->valuedouble;	/* x */ 
+        double y = cJSON_GetObjectItem(json, "y")->valuedouble;	/* y */ 
+        char *time_str = cJSON_GetObjectItem(json, "time")->valuestring;	/* time */ 
+        long long time = timestamp(time_str);
+        /* 在手环数组寻找手环 */ 
+        for(i=0;i<TAG_SIZE;i++)
+        {
+			if (tags[i].id==NULL) {
+				break;
+			}
+            if(strcmp(tags[i].id,id)==0)
+            {
+                flag = 1;//若存在则跳出
+                printf("手环%s存在于数组%d上 \n",id,i);
+                break;		
+            }
+
+        }
+        if(flag==0)
+        {
+            printf("-------正在为手环%s初始化------- \n",id);
+			tags[now_tag].id = (char *)malloc(strlen(id)*sizeof(char));
+            strcpy(tags[now_tag].id,id);//id赋值
+            tags[now_tag].cur_x = x;
+            tags[now_tag].cur_y = y;
+            tags[now_tag].cur_t = time;
+            tags[now_tag].smo_li[0].x = x;
+            tags[now_tag].smo_li[0].y = y;
+            tags[now_tag].smo_li[0].t = time;
+            tags[now_tag].smo_li[0].dt = 0.0;
+            tags[now_tag].smo_num = 1;
+            confidentDegree = -100.0;
+            now_tag ++;
+            printf("-------手环%s初始化完成------- \n",id);
+        }
+        else
+        {
+			/* 
+			** 先判断手环是不是已经平稳（即字段is_smo是否等于1） 
+			** 如果手环没有平稳，则进入判断是否平稳的函数
+			** 如果手环已经平稳，则进入判断是否漂移的函数 
+			** 修改数据 将上一条记录改成当前条，当前条更新为读取的数据
+			*/ 			
+			tags[i].pri_x = tags[i].cur_x;
+            tags[i].pri_y = tags[i].cur_y;
+            tags[i].pri_t = tags[i].cur_t;
+            tags[i].cur_x = x;	
+            tags[i].cur_y = y;
+            tags[i].cur_t = time;	
+            dt =(double) (tags[i].cur_t-tags[i].pri_t)/1000.0;   
+            if(!tags[i].is_smo){
+				printf("-------手环%s未进入平稳状态------- \n",id);
+                if(dt>=TIME_LIM){
+                    //时间差大于等于10s
+                    puts("相邻时间差大于10s");
+                    tags[i].smo_li[0].x = x;
+                    tags[i].smo_li[0].y = y;
+                    tags[i].smo_li[0].t = time;
+                    tags[i].smo_li[0].dt = dt;
+                    tags[i].smo_num = 1;
+                }else{
+                    puts("相邻时间差小于10s");
+                    nn = tags[i].smo_num;
+                    tags[i].smo_li[nn].x = x;
+                    tags[i].smo_li[nn].y = y;
+                    tags[i].smo_li[nn].t = time;
+                    tags[i].smo_li[nn].dt = dt;
+                    tags[i].smo_num++;
+                    nn++;
+                    if(nn>=SMO_SIZE){
+						printf("手环%s准平稳段已经装满10条数据，开始判断其平稳性与否...\n",id);
+                        is_steady(i);
+                    }
+                }
+            }else{
+				printf("手环%s已经平稳\n",id);
+                char binstr[GEO_BIN_LEN];
+                tags[i].cur_x = x;
+                tags[i].cur_y = y;
+                tags[i].cur_t = time;
+                tags[i].pri_x = tags[i].cur_x;
+                tags[i].pri_y = tags[i].cur_y;
+                tags[i].pri_t = tags[i].cur_t;    
+                if (coorToBin(x,y,binstr)==0) {
+                    tags[i].pri_decGrid = tags[i].cur_decGrid;
+                    tags[i].cur_decGrid = binToDec(binstr);
+                    strcpy(tags[i].pri_grid,tags[i].cur_grid);
+                    base32_encode(binstr,tags[i].cur_grid);
+                }else {
+                    confidentDegree = -100;
+                }
+                // strcpy(tags[i].cur_grid,base32_encode(binstr));
+                if(dt<TIME_LIM){
+                    puts("时间差小于10s");
+                    confidentDegree = drift(i,dt)*100;
+                }else{
+                    puts("时间差大于10s");
+                    confidentDegree = 0;
+                }
+            }
+
+        }
+        cJSON_AddNumberToObject(json,"cd",confidentDegree);
+        char *jsonStr = cJSON_Print(json);
+        printf("置信度=%.2f \n",confidentDegree);
+        printf("\n");
+        return jsonStr;	
+    }
+    // puts("pp");
+    
+    return data;
+}
+
 
 char *ReadData(FILE *fp,char *buf)
 {
@@ -752,7 +887,7 @@ double min_double(double x,double y)
     return x<y?x:y;
 }
 
-int Area_information_acquisition(void *arg){
+void *Area_information_acquisition(void *arg){
 	char *filename = (char *)arg;
 	FILE * fp = NULL;/*文件指针*/
     char * buf;/*数据缓存区，记得free*/
@@ -794,7 +929,7 @@ int dichotomy(double * range,double top,double low)
     return count;
 }
 
-int Room_information_acquisition(void *arg)
+void *Room_information_acquisition(void *arg)
 {
 	char *filename = (char *)arg;
 	FILE * fp = NULL;/*文件指针*/
@@ -898,31 +1033,7 @@ int Room_information_acquisition(void *arg)
 	return 0;
 }
 
-/*补位*/
-char* complement(char * str,int digit)
-{
-	int st = strlen(str);/*字符串长度*/
-	if(st<digit)
-	{
-		/*不足digit位补位*/
-		int diff = digit-st;
-		char *tmp;
-		tmp = (char *)malloc(digit*sizeof(char));
-		strcpy(tmp,str);
-		for(int i = 0; i < digit; i++)
-		{
-			if (i<diff)
-				str[i] = '0';/* 补0 */
-			else
-				str[i] = tmp[i-diff];/* 移位 */
-		}
-		str[digit]='\0';
-		free(tmp);
-		tmp = NULL;
-	}
 
-	return str;
-}
 
 /*十进制转二进制*/
 char* DectoBin(char* str, int count,int alpha)
@@ -1048,20 +1159,13 @@ int * Geohash_Grid(void)
     char geostr[GEO_STR_LEN];
     int count = 0;
     int index,rN;
-    // int *area_num;
     int index_lim = (pow(2,alpha))*(pow(2,alpha));
-    // area_num = (int *)malloc( index_lim *sizeof(int));
-    // int *passDire;
-    // passDire = (int *)malloc( LINE *sizeof(int));
-    // FILE *fp = NULL;
-    // fp = fopen("D:\\program\\UWB\\data\\gridec.txt","w");
     for( yCount = 0; yCount < pow(2,alpha); yCount++)
     {
         y = areas.low_y + ySize * yCount;
         for( xCount = 0; xCount < pow(2,alpha); xCount++)
         {
             x = areas.low_x + xSize * xCount;
-			// printf("x:%f,x:%f\n",x,y);
             Geohash_segGrid_Bin(binStr,xCount,yCount,alpha);
             Base32_BintoStr(binStr,geostr);
             index = BintoDec(binStr);
@@ -1078,16 +1182,14 @@ int * Geohash_Grid(void)
 				grids[index].areaCount = rooms[rN].grid_num;
                 inWall(x,y,rN,index);
             }
-            // fprintf(fp,"x:%f,y:%f == Geohash=%s,decimal base=%d\n",x,y, geostr,BintoDec(binStr));
             printf("x:%f,y:%f == Geohash=%s,decimal base=%d\n",x,y, geostr,index);
         }
         
     }
-    // fclose(fp);
     return area_num;
 }
 
-/* 初始化 比如可达区域 */ 
+/* 读取txt*/ 
 int Init_Read_txt()
 {
 	pthread_mutex_init (&access_lock,NULL);
@@ -1097,10 +1199,12 @@ int Init_Read_txt()
 	char file2[255];
 	printf("Input the filename of all area information txt:");
 	scanf("%s",&file2); 
+	printf("file2=%s\n",file2);
 	printf("Input the filename of room information txt:");
 	scanf("%s",&file1);
-	// pthread_create(&pid2,NULL,Area_information_acquisition,(void *)&file2);
-	// pthread_create(&pid1,NULL,Room_information_acquisition,(void *)&file1);
+	printf("file1=%s\n",file1);
+	pthread_create(&pid2,NULL,Area_information_acquisition,(void *)&file2);
+	pthread_create(&pid1,NULL,Room_information_acquisition,(void *)&file1);
 
 	// pthread_create(&pid1,NULL,Read_Access_Area,(void *)&file1);
  
@@ -1131,58 +1235,17 @@ int assignment(int row,int col,int value,int * mat,int all)
             index = col*all+row;
             mat[index] = value;
         }
-		printf("%d\n",index);
+		// printf("%d\n",index);
         return 0;
     }
     return -1;
 }
 
 
-/*  输入x,y坐标，输出二进制字符串
-**	@param x doublex
-**	@param y doubley
-*/
-int coorToBin(double x, double y, char *strBin)
-{
-    double x_mid,y_mid;
-    double x_min = areas.low_x;
-    double y_min = areas.low_y;
-    double x_max = areas.top_x;
-    double y_max = areas.top_y;
-    if ((x>=x_min && x<=x_max) && (y>=y_min && y<=y_max))
-    {
-        puts("In area.");
-        for(int i = 0; i < alpha; i++)
-        {
-            y_mid = (y_min + y_max) / 2.0;
-            x_mid = (x_min + x_max) / 2.0;
-            if (x<=x_mid) {
-                strBin[i*2] = '0';/* 左0 */
-                x_max = x_mid;
-            }
-            else {
-                strBin[i*2] = '1';/* 右1 */
-                x_min = x_mid;
-            }
-            if (y<=y_mid) {
-                strBin[i*2+1] = '0';/* 左0 */
-                y_max = y_mid;
-            }
-            else {
-                strBin[i*2+1] = '1';/* 右1 */
-                x_min = x_mid;
-            }
-        }
-        strBin[alpha*2] = '\0';
-        return 0;
-    }else{
-        puts("Out of area!");
-        return 1;
-    }     
-}
+
 
 int CoortoDec(int x , int y){
-	str[GEO_BIN_LEN];
+	char str[GEO_BIN_LEN];
 	if (coorToBin(x,y,str)==0) {
 		return BintoDec(str);
 	}else {
@@ -1200,191 +1263,118 @@ int CheckArea(int dec){
 	}
 	
 }
-ss
 
-int* connectedMatrix(int rN){
+
+int* connectedMatrix(int rN,int *mat){
 	int all  = rooms[rN].grid_num;
-	int * mat;
-	mat = (int *)malloc(all*all*sizeof(int));
+	// int * mat;
+	// mat = (int *)malloc(all*all*sizeof(int));
 	int i,j,k;
-	int i_mat,i_grid,j_grid;
+	int i_mat,j_mat,i_grid,j_grid;
+	// printf("all:%d\n",all);
 	for(i = 0; i < all*all; i++)
         mat[i] = 0;
-	for(i_mat = 0; i_mat < all*all; i_mat++){
+	for(i_mat = 0; i_mat < all; i_mat++){
+		printf("%d\n",i_mat);
 		assignment(i_mat,i_mat,1,mat,all );
 		i_grid = rooms[rN].grid_list[i_mat];
 		if (grids[i_grid].east==0) {
-			j_grid = CoortoDec(grids[i_grid].x-xSize,grids[i_grid].y);
-			if(CheckArea(j_grid)==rN){
-				if ()
-				{
-					
+			j_grid = CoortoDec(grids[i_grid].x+xSize,grids[i_grid].y);/*东*/
+			if(CheckArea(j_grid)==rN && grids[j_grid].west==0){
+				j_mat = grids[j_grid].areaCount;
+				assignment(i_mat,j_mat,1,mat,all);
+				if (grids[i_grid].north==0) {
+					j_grid = CoortoDec(grids[i_grid].x,grids[i_grid].y+ySize);/*北*/
+					if(CheckArea(j_grid)==rN && grids[j_grid].south==0){
+						j_mat = grids[j_grid].areaCount;	
+						assignment(i_mat,j_mat,1,mat,all);
+						j_grid = CoortoDec(grids[i_grid].x+ySize,grids[i_grid].y+ySize);/*东北*/
+						j_mat = grids[j_grid].areaCount;
+						assignment(i_mat,j_mat,1,mat,all);
+						if(grids[i_grid].west==0) {
+							j_grid = CoortoDec(grids[i_grid].x-xSize,grids[i_grid].y);/*西*/
+							if(CheckArea(j_grid)==rN && grids[j_grid].east==0){
+								j_mat = grids[j_grid].areaCount;	
+								assignment(i_mat,j_mat,1,mat,all);
+								j_grid = CoortoDec(grids[i_grid].x-ySize,grids[i_grid].y+ySize);/*西北*/
+								j_mat = grids[j_grid].areaCount;
+								assignment(i_mat,j_mat,1,mat,all);									
+							}
+						}							
+					}					
 				}
+				if (grids[i_grid].south==0) {
+					j_grid = CoortoDec(grids[i_grid].x,grids[i_grid].y-ySize);/*南*/
+					if(CheckArea(j_grid)==rN && grids[j_grid].north==0){
+						j_mat = grids[j_grid].areaCount;	
+						assignment(i_mat,j_mat,1,mat,all);
+						j_grid = CoortoDec(grids[i_grid].x+ySize,grids[i_grid].y-ySize);/*东南*/
+						j_mat = grids[j_grid].areaCount;
+						assignment(i_mat,j_mat,1,mat,all);
+						if(grids[i_grid].west==0) {
+							j_grid = CoortoDec(grids[i_grid].x-xSize,grids[i_grid].y);/*西*/
+							if(CheckArea(j_grid)==rN && grids[j_grid].east==0){
+								j_mat = grids[j_grid].areaCount;	
+								assignment(i_mat,j_mat,1,mat,all);
+								j_grid = CoortoDec(grids[i_grid].x-ySize,grids[i_grid].y-ySize);/*西南*/
+								j_mat = grids[j_grid].areaCount;
+								assignment(i_mat,j_mat,1,mat,all);									
+							}
+						}							
+					}					
+				}					
 			}
 		}
 		else if(grids[i_grid].west==0) {
-			/* code */
+			j_grid = CoortoDec(grids[i_grid].x-xSize,grids[i_grid].y);/*西*/
+			if(CheckArea(j_grid)==rN && grids[j_grid].east==0){	
+				j_mat = grids[j_grid].areaCount;	
+				assignment(i_mat,j_mat,1,mat,all);
+				if (grids[i_grid].north==0) {
+					j_grid = CoortoDec(grids[i_grid].x,grids[i_grid].y+ySize);/*北*/
+					if(CheckArea(j_grid)==rN && grids[j_grid].south==0){
+						j_mat = grids[j_grid].areaCount;	
+						assignment(i_mat,j_mat,1,mat,all);
+						j_grid = CoortoDec(grids[i_grid].x-ySize,grids[i_grid].y+ySize);/*西北*/
+						j_mat = grids[j_grid].areaCount;
+						assignment(i_mat,j_mat,1,mat,all);						
+					}					
+				}
+				if (grids[i_grid].south==0) {
+					j_grid = CoortoDec(grids[i_grid].x,grids[i_grid].y-ySize);/*南*/
+					if(CheckArea(j_grid)==rN && grids[j_grid].north==0){
+						j_mat = grids[j_grid].areaCount;	
+						assignment(i_mat,j_mat,1,mat,all);
+						j_grid = CoortoDec(grids[i_grid].x-ySize,grids[i_grid].y-ySize);/*西南*/
+						j_mat = grids[j_grid].areaCount;
+						assignment(i_mat,j_mat,1,mat,all);							
+					}					
+				}									
+			}		
 		}
 		else {
-			/* code */
+			if (grids[i_grid].north==0) {
+				j_grid = CoortoDec(grids[i_grid].x,grids[i_grid].y+ySize);/*北*/
+				if(CheckArea(j_grid)==rN && grids[j_grid].south==0){
+					j_mat = grids[j_grid].areaCount;	
+					assignment(i_mat,j_mat,1,mat,all);					
+				}					
+			}
+			if (grids[i_grid].south==0) {
+				j_grid = CoortoDec(grids[i_grid].x,grids[i_grid].y-ySize);/*南*/
+				if(CheckArea(j_grid)==rN && grids[j_grid].north==0){
+					j_mat = grids[j_grid].areaCount;	
+					assignment(i_mat,j_mat,1,mat,all);						
+				}					
+			}
 		}
-		
-
 	}
 }
 
 
-int* connectedMatrix1(int rN)
-{
-    int all = rooms[rN].grid_num;
-    // int mat[all*all];
-    int *mat;
-    mat = (int *)malloc(all*all*sizeof(int));
-    int i,j;
-    int p;
-    for(i = 0; i < all*all; i++)
-        mat[i] = 0;
-    for(j = 0; j < all; j++)
-    {
-		i = rooms[rN].grid_list[j];
-        assignment(i,i,1,mat,all);//对角边
-		assignment(j,j,1,mat,all);
-        if (grids[i].east == 0) {
-            p = j + 1;/* 东 */
-			// k = rooms[rN].grid_list[p];
-            if(p >= 0 && p < all) {
-				i = rooms[rN].grid_list[p];
-				i = rooms[rN].grid_list[p];
-				if (grids[i].west == 0){
-					assignment(j,p,1,mat,all);
-					if(grids[i].north == 0){
-						p = j + pow(2,alpha);/* 北 */
-						// k = rooms[rN].grid_list[p];
-						if(p >= 0 && p < all) {
-							i = rooms[rN].grid_list[p];
-							if (grids[i].south == 0){
-								assignment(i,p,1,mat,all);
-								p = j + pow(2,alpha) + 1;/* 东北 */
-								// k = rooms[rN].grid_list[p];
-								assignment(i,p,1,mat,all);
-								if (grids[i].west == 0) {
-									p = j - 1;/* 西 */
-									// k = rooms[rN].grid_list[p];
-									if(p >= 0 && p < all) {
-										i = rooms[rN].grid_list[p];
-										if (grids[i].east == 0){
-											assignment(i,p,1,mat,all);
-											p = j + pow(2,alpha) - 1;/* 西北 */
-											// k = rooms[rN].grid_list[p];
-											assignment(i,p,1,mat,all);
-										}
-									}
-								}
-							}
-						}
-					}
-                }
-                if(grids[i].south == 0){
-                    p = j - pow(2,alpha);/* 南 */
-					// k = rooms[rN].grid_list[p];
-                    if(p >= 0 && p < all) {
-						i = rooms[rN].grid_list[p];
-						if (grids[i].north == 0){
-							assignment(i,p,1,mat,all);
-							p = j - pow(2,alpha) + 1;/* 东南 */
-							// k = rooms[rN].grid_list[p];
-							assignment(i,p,1,mat,all);
-							if (grids[i].west == 0) {
-								p = j - 1;/* 西 */
-								// k = rooms[rN].grid_list[p];
-								if(p >= 0 && p < all) {
-									i = rooms[rN].grid_list[p];
-									if (grids[i].east == 0){
-										assignment(i,p,1,mat,all);
-										p = j + pow(2,alpha) - 1;/* 西北 */
-										// k = rooms[rN].grid_list[p];
-										assignment(i,p,1,mat,all);
-									}
-								}
-							}  
-						}                      
-                    }                    
-                }
-            }
-        }else if(grids[i].west == 0){
-            p = j - 1;/* 西 */
-			// k = rooms[rN].grid_list[p];
-            if(p >= 0 && p < all) {
-				i = rooms[rN].grid_list[p];
-				if (grids[i].east == 0){
-						assignment(i,p,1,mat,all);
-						if(grids[i].north == 0){
-							p = j + pow(2,alpha);/* 北 */
-							// k = rooms[rN].grid_list[p];
-							if(p >= 0 && p < all) {
-								i = rooms[rN].grid_list[p];
-								if (grids[i].south == 0){
-									assignment(i,p,1,mat,all);
-									p = j + pow(2,alpha) - 1;/* 西北 */
-									// k = rooms[rN].grid_list[p];
-									assignment(i,p,1,mat,all);
-								}
-							}
-						}
-					}
-                }
-                if(grids[i].south == 0){
-                    p = j - pow(2,alpha);/* 南 */
-					// k = rooms[rN].grid_list[p];
-                    if(p >= 0 && p < all) {
-						i = rooms[rN].grid_list[p];
-						if (grids[i].north == 0){
-							assignment(i,p,1,mat,all);
-							p = j - pow(2,alpha) - 1;/* 西南 */
-							// k = rooms[rN].grid_list[p];
-							assignment(i,p,1,mat,all);
-						}
-                    }
-                }                                
-            
-        }else{
-            if(grids[i].north == 0){
-                p = j + pow(2,alpha);/* 北 */
-				// k = rooms[rN].grid_list[p];
-                if(p >= 0 && p < all) {
-					i = rooms[rN].grid_list[p];
-					if (grids[i].south == 0)
-                    	assignment(i,p,1,mat,all);
-				}
-            }
-            if(grids[i].south == 0){
-                p = j - pow(2,alpha);/* 南 */
-				// k = rooms[rN].grid_list[p];
-                if(p >= 0 && p < all) {
-					i = rooms[rN].grid_list[p];
-					if (grids[i].north == 0)
-                    	assignment(i,p,1,mat,all);
-				}
-            }
-        }
-	}
-
-    // int k;
-    // for(i = 0; i < all; i++)
-    // {
-    //     for(int j = 0; j < all; j++)
-    //     {
-    //         k = i*all + j;
-    //         printf("%d,",mat[k]);
-    //     }
-    //     printf("\n");
-    // }
-    
-    return mat;
-}
 
 
-int * dot(int * a_mat, int * b_mat,int a_row,int b_row,int a_col,int b_col)
+int * dot(int * a_mat, int * b_mat,int a_row,int b_row,int a_col,int b_col,int *c_mat)
 {
     if(a_col != b_row)
     {
@@ -1395,8 +1385,8 @@ int * dot(int * a_mat, int * b_mat,int a_row,int b_row,int a_col,int b_col)
         // double * bp = (double *)b;//获取矩阵a的首地址 
         int value;
         int i,j,k;
-        int *c_mat;
-        c_mat = (int *)malloc(a_row * b_col*sizeof(int));
+        // int *c_mat;
+        // c_mat = (int *)malloc(a_row * b_col*sizeof(int));
         for( i = 0; i < a_row; i++)
         {
             for( j = 0; j < b_col; j++)
@@ -1411,56 +1401,57 @@ int * dot(int * a_mat, int * b_mat,int a_row,int b_row,int a_col,int b_col)
     }
 }
 
-// int test(void){
-// 	int *matA = connectedMatrix(0);
-// 	printf("%d\n",matA[590]);
-// 	return 0;
-// }
-
-int canGet(void)
-{
-    int rN,row,i,j,count;
-    for(rN = 0; rN < ROOM_QUANT; rN++)
-    {
-        int *matA,*tmp,*matB;
-        int accesstime;
-        matA = connectedMatrix(rN);
-		printf("room %d\n",rN);
-		for (int i = 0; i < pow(rooms[rN].grid_num,2); i++)
-		{
-			printf("%d,",matA[i]);
-			if ((i+1)%rooms[rN].grid_num==0)
-			{
-				printf("\n");
-			}
-		}
-        // matB = matA;
-        // row = rooms[rN].grid_num;
-        // char *key1,*key2;
-        // int flag;
-        // for(int time = 1; time < STEP; time++)
-        // {
-        //     tmp  = dot(matA,matB,row,row,row,row);
-        //     accesstime = ((int)(time/4))+1;
-        //     count = 0;
-        //     for(i = 0; i < row; i++)
-        //     {
-        //         key1 = grids[rN].numStr;
-                
-        //         for(j = 0; j < row; j++)
-        //         {
-        //             if (tmp[i*row+j]>0)
-        //             {
-        //                 key2 = grids[rN].numStr;
-        //                 hash_insert(key1,key2,accesstime);
-        //             }
-        //         }
-        //     }
-        //     matB = tmp;
-        // }
-    }
-    return 0;
+int test(void){
+	int *matA;
+    matA = (int *)malloc(rooms[0].grid_num*rooms[0].grid_num*sizeof(int));
+	connectedMatrix(0,matA);
+	printf("%d\n",matA[0]);
+	return 0;
 }
+
+int canGet(void){
+	int rN,accesstime,row,i,j,i_grid,j_grid;
+	int *matA,*tmp,*matB;
+    char *key1,*key2;	
+	for(rN = 0; rN < ROOM_QUANT; rN++)
+	{
+		matA = (int *)malloc(rooms[rN].grid_num*rooms[rN].grid_num*sizeof(int));
+		connectedMatrix(rN,matA);
+		row = rooms[rN].grid_num;
+		for(int time = 0; time < STEP; time++){
+			
+			if (time==0) {
+				matB = (int *)malloc(row*row*sizeof(int));
+				tmp  = (int *)malloc(row*row*sizeof(int));
+				memcpy(matB,matA,sizeof(int)*row*row);
+				memcpy(tmp ,matA,sizeof(int)*row*row);
+			}
+			else {
+				dot(matA,matB,row,row,row,row,tmp);
+				memcpy(matB,tmp,sizeof(int)*row*row);
+			}
+			accesstime = ((int)(time/4))+1;
+			for(i = 0; i < row; i++){
+				for(j = 0; j < row; j++){
+					i_grid = rooms[rN].grid_list[i];
+					key1 = grids[i_grid].numStr;
+                    if (tmp[i*row+j]>0){
+						j_grid = rooms[rN].grid_list[j];
+						key2 = grids[j_grid].numStr;						
+						hash_insert(key1,key2,accesstime);
+					}					
+				}				
+			}
+			
+		}
+		free(tmp);
+		free(matA);
+		free(matB);
+	}
+	
+
+}
+
 
 /* 工作函数  */
 void *func_process(void *thr_pool)
@@ -1736,35 +1727,79 @@ int readConfiguration(char *fileAddr)
 	
 	return 1;
 }
-
-
-// int main()
-// {
-// 	if(!readConfiguration("config.json"))
-// 		return 0;
-	
-// 	Init_HashTable();
-// 	Init_Read_txt();
-
-// 	display_hash_table();
-	
-// 	/* 初始化线程池，开启THREAD_NUM条工作线程 */ 
-// 	threadpool_t *pool = init(THREAD_NUM);	
-// 	/* 直到接收线程停止，程序终止 */ 
-// 	pthread_join(pool->rec_tid,NULL);
-	
-// }
-main(int argc, char const *argv[])
+int remove(int index , char * data)
 {
+    char * tmp =NULL;
+    tmp = (char*)malloc(strlen(data)*sizeof(char));
+    strcpy(tmp,data);
+    for(int i = index; i < (strlen(data)-1); i++)
+    {
+        data[i] = tmp[i+1];
+    }
+    data[strlen(data)-1] = '\0';
+    free(tmp);
+    return 0;
+}
+
+
+
+
+int main()
+{
+	if(!readConfiguration("config.json"))
+		return 0;
+	
+	Init_HashTable();
+	// Init_Read_txt();
 	char filename1[] = "area.txt";
 	char filename2[] = "room.txt";
 	Area_information_acquisition((void *)&filename1);
 	Room_information_acquisition((void *)&filename2);
 	Geohash_Grid();
-	Init_HashTable();
-	// canGet();
-	// test();
-	return 0;
+
+	canGet(); 
+	Init_Route();
+
+	// display_hash_table();
+	
+	/* 初始化线程池，开启THREAD_NUM条工作线程 */ 
+	threadpool_t *pool = init(THREAD_NUM);	
+	/* 直到接收线程停止，程序终止 */ 
+	pthread_join(pool->rec_tid,NULL);
+	
 }
+
+
+
+
+// int main(int argc, char const *argv[])
+// {
+// 	clock_t start,finish;
+// 	double total_time;
+// 	char filename1[] = "area.txt";
+// 	char filename2[] = "room.txt";
+// 	Area_information_acquisition((void *)&filename1);
+// 	Room_information_acquisition((void *)&filename2);
+// 	Geohash_Grid();
+// 	Init_HashTable();
+// 	canGet(); 
+// 	Init_Route();
+// 	puts("init ok;");
+//     char data[] = "[{\"type\":0,\"time\":\"2018-7-25 16:14:30.354\",\"le_guid\":\"\",\"tagid\":\"DECA00FFCF54581C\",\"xcoord\":4.170346,\"ycoord\":2.147416,\"zcoord\":10000}]";
+//     remove(0,data);
+// 	remove(134,data);
+// 	// puts(data);
+//     for(int i = 0; i < 20; i++)
+//     {
+//         start = clock(); 
+//         resolve_str(data);
+//         finish = clock(); 
+//         total_time = (double)(finish-start)/CLOCKS_PER_SEC;
+//         printf("total_time=%fs\n\n################\n",total_time);
+//     }
+    
+    
+//     return 0;
+// }
 
 
