@@ -17,22 +17,24 @@
 #define Y_MIN 0		/* 平面图y最小值 */ 
 #define Y_MAX 100	 /* 平面图y最大值 */ 
 #define SMO_MAX_NUM 10	/* 准平稳条数 */ 
-#define SP_LIM 5	// 速度	 
-#define LINE 30     /*txt文件行最大长度*/
-#define ROOM_QUANT 2 /*房间区域数量*/
-#define WALL_QUANT 4 /*房间内墙体数量*/
-#define COR_X 0.69/*修正x*/
-#define COR_Y 0.94/*修正y*/
-#define GEO_BIN_LEN 8/*Geohash二进制字符串*/
-#define GEO_STR_LEN 4/*Geohash字母字符串长度*/
+// #define SPEED_LIM 5	// 速度	 
+#define LINE 41     /*txt文件行最大长度*/
+#define ROOM_QUANT 13 /*房间区域数量*/
+#define WALL_QUANT 8 /*房间内墙体数量*/
+// #define COR_X 0.69/*修正x*/
+// #define COR_Y 0.94/*修正y*/
+#define COR_X 0.0/*修正x*/
+#define COR_Y 0.0/*修正y*/
+#define GEO_BIN_LEN 14/*Geohash二进制字符串*/
+#define GEO_STR_LEN 3/*Geohash字母字符串长度*/
 #define BASE32_LAY_LEN 5 /*Geohash字符编码最大长度*/
 #define BASE32_MIN_LEN 8 /*BASE32每层网络的字符长度，多少个二进编码为一个字符*/
-#define GRID_QUANT 60000 /*栅格数量*/
+#define GRID_QUANT 20000 /*栅格数量*/
 #define STEP 30 /*步数*/
 #define SMO_SIZE 10
 #define TIME_LIM 10
-#define ROUTE_QUANT 6
 #define SPEED_LIM 4
+#define ROUTE_QUANT 50
 
 static const char base32_alphabet[32] = {
         '0', '1', '2', '3', '4', '5', '6', '7',
@@ -74,7 +76,7 @@ typedef struct Smo{
 
 
 
-/*手环缓存区*/
+/*手环*/
 typedef struct Tag{
 	char *id = NULL;	/* 手环编号 */ 
 	double cur_x;	//当前x 
@@ -92,6 +94,7 @@ typedef struct Tag{
     int pri_decGrid;
 };
 
+/*墙*/
 typedef struct Wall{
     double top_x;
 	double low_x;
@@ -189,7 +192,7 @@ struct Grid grids[GRID_QUANT];/*栅格数组*/
 struct Area areas;
 struct Tag tags[TAG_SIZE];/* 手环数组 */ 
 int alpha;
-double xSize,ySize;
+double xSize,ySize;/*栅格尺寸*/
 int area_num[GRID_QUANT];
 int now_tag = 0;
 struct Route route_table[ROUTE_QUANT];/*路由表数组*/
@@ -451,6 +454,7 @@ int binToDec(char * binStr)
 */
 int coorToBin(double x, double y, char *strBin)
 {
+	// puts("coorToBin");
     double x_mid,y_mid;
     double x_min = areas.low_x;
     double y_min = areas.low_y;
@@ -463,22 +467,29 @@ int coorToBin(double x, double y, char *strBin)
         {
             y_mid = (y_min + y_max) / 2.0;
             x_mid = (x_min + x_max) / 2.0;
-            if (x<=x_mid) {
+			// printf("->xm:%f,ym:%f\n\n",x_mid,y_mid);
+            if (x_min<= x && x<x_mid) {
                 strBin[i*2] = '0';/* 左0 */
+				// printf("0:%f<=x:%f<%f\n\n",x_min,x,x_mid);
                 x_max = x_mid;
             }
             else {
                 strBin[i*2] = '1';/* 右1 */
+				// printf("1:%f<=x:%f<%.9f\n\n",x_mid,x,x_max);
                 x_min = x_mid;
             }
-            if (y<=y_mid) {
+            if (y_min<=y && y<y_mid) {
                 strBin[i*2+1] = '0';/* 左0 */
+				// printf("0:%f<=y:%f<%f\n\n",y_min,y,y_mid);
                 y_max = y_mid;
             }
             else {
                 strBin[i*2+1] = '1';/* 右1 */
+				// printf("1:%f<=y:%f<%f\n\n",y_mid,y,y_max);
                 x_min = x_mid;
             }
+			// puts(strBin);
+			
         }
         strBin[alpha*2] = '\0';
         return 0;
@@ -555,7 +566,7 @@ int is_steady(int tag_pos)
         // speed(tags[tag_pos].smo_li[i-1].dt)
         double sp = speed(dists(tags[tag_pos].smo_li[i-1],tags[tag_pos].smo_li[i]),
         tags[tag_pos].smo_li[i-1].dt);
-        if(sp<SP_LIM)
+        if(sp<SPEED_LIM)
         {
             count++;
             if(count==7)
@@ -801,62 +812,7 @@ char *ReadData(FILE *fp,char *buf)
 }
 
 
-// void *Read_Access_Area(void *arg)
-// {
-// 	/* 记录运行时间 */ 
-// 	clock_t start,finish;
-// 	double total_time;
-	
-// 	char *buf,*p;
-// 	char *filename = (char *)arg;
-	
-// 	printf("filename: %s \n",filename);
-	
-// 	FILE *fp = fopen(filename, "r+");
-// 	if(fp==NULL)
-// 	{
-// 		printf("open file fail！\n");
-// 		return 0;
-// 	}
-	
-// 	buf = (char *)malloc(LINE*sizeof(char));	
-	
-// 	start = clock();
-// 	while(1)
-// 	{
-// 		pthread_mutex_lock(&access_lock);
-		
-// 		char *key1,*key2;
-// 		char *time_str;
-// 		int time;
-// 		p = ReadData(fp,buf);//每次调用文件指针fp会自动后移一行
-// 		if(!p)
-// 		{
-// 			break;	//每次调用文件指针fp会自动后移一行
-// 		}
-		
-// 		key1 = (char *)malloc(sizeof(char)*9);
-// 		key2 = (char *)malloc(sizeof(char)*9);
-// 		time_str = (char *)malloc(sizeof(char)*2);
-		
-// 		strncpy(key1,p+1,8);
-// 		strncpy(key2,p+13,8);
-// 		strncpy(time_str,p+24,1);
-// 		key1[8] = '\0';	key2[8] = '\0';	time_str[1] = '\0';
-// 		time = atoi(time_str);
-		
-// 		hash_insert(key1,key2,time);
-		
-// 		free(key1);free(key2);free(time_str);
-// 		pthread_mutex_unlock(&access_lock);	
-// 	}
-	
-// 	finish = clock();
-// 	total_time = (double)(finish-start)/CLOCKS_PER_SEC;
-		
-// 	printf("Runnig time of this process:%0.4f ms \n",total_time);
 
-// }
 
 /*分割txt字符串*/
 double * split(char * data,double *list)
@@ -903,6 +859,7 @@ void *Area_information_acquisition(void *arg){
 			areas.top_y = list[3];
 			areas.low_y = list[4];
 		}
+		printf("--->top_x=%f,low_x=%f,top_y=%f,low_y=%f\n",areas.top_x,areas.low_x,areas.top_y,areas.low_y);
 		printf("File %s read completed.\n",filename);
 		fclose(fp);		
 	}
@@ -926,6 +883,7 @@ int dichotomy(double * range,double top,double low)
         grid_size = grid_size/2;
         count++;
     }
+	printf("grid width:%f\n",grid_size);
     return count;
 }
 
@@ -945,12 +903,13 @@ void *Room_information_acquisition(void *arg)
 		printf("File %s reading...\n",filename);/* file exist. */
 		while (fgets(buf,LINE,fp)!=NULL){
 			// puts(buf);
-			if (strlen(buf)<3){
+			if (buf[0]=='#'){
 				if (count=4){
 					rooms[rN].room_type=0;/*标准区域*/
 				}else{
 					rooms[rN].room_type=1;/*非区域*/
 				}
+				printf("--->room%d:top_x=%f,low_x=%f,top_y=%f,low_y=%f\n",rN,rooms[rN].top_x,rooms[rN].low_x,rooms[rN].top_y,rooms[rN].low_y);/*房间区域坐标打印*/
 				count = 0;
 				rN ++;
 			}else{
@@ -1021,15 +980,16 @@ void *Room_information_acquisition(void *arg)
 	}
 	free(buf);
 	buf = NULL;
-	printf("x:%f,%f\n",x_range[0],x_range[1]);
-	printf("y:%f,%f\n",y_range[0],y_range[1]);
+	// printf("x:%f,%f\n",x_range[0],x_range[1]);
+	// printf("y:%f,%f\n",y_range[0],y_range[1]);
 	//动态计算精度范围
     if(x_range[1]>y_range[1]){
         alpha      = dichotomy(x_range,areas.top_x,areas.low_x);//通过x范围计算二分次数
     }else{
         alpha      = dichotomy(y_range,areas.top_y,areas.low_y);//通过y范围计算二分次数
     }
-	printf("%d\n",alpha);
+	printf("二分次数：%d\n",alpha);
+	// sleep(1000);
 	return 0;
 }
 
@@ -1046,10 +1006,13 @@ char* DectoBin(char* str, int count,int alpha)
 /*用Geohash二分法划分栅格，返回二进制字符串*/
 char* Geohash_segGrid_Bin(char *str,int xCount,int yCount,int alpha)
 {
+	// puts("Geohash_segGrid_Bin");
     char xStr[GEO_BIN_LEN/2],yStr[GEO_BIN_LEN/2];
     DectoBin(xStr,xCount,alpha);
     DectoBin(yStr,yCount,alpha);
     // char str[GEOLEN];
+	// puts(xStr);
+	// puts(yStr);
     int j;
     for(int i = 0; i < alpha*2; i++)
     {
@@ -1059,6 +1022,7 @@ char* Geohash_segGrid_Bin(char *str,int xCount,int yCount,int alpha)
             str[i]=xStr[j];/* 偶x */
         else 
             str[i]=yStr[j];/* 奇 */
+		// puts(str);
     }
     int end = alpha*2;
     str[end]='\0';
@@ -1108,13 +1072,15 @@ char* Base32_BintoStr(char *bin_source,char * code)
 /*查找房间号码*/
 int GetRoomNum(double x,double y)
 {
+	// printf("x=%f,y=%f,bx=%f,by=%f\n",x,y,x+xSize,y+ySize);
     for (int rN = 0; rN < ROOM_QUANT; rN++)
     {
         if ((rooms[rN].low_x<=x+xSize && rooms[rN].top_x>x) && (rooms[rN].low_y<=y+ySize && rooms[rN].top_y>y))
-            return rN;
+			return rN;            
     }
     return -1;
 }
+
 
 /*查看栅格通行情况*/
 int inWall(double x,double y,int rN,int index)
@@ -1160,32 +1126,46 @@ int * Geohash_Grid(void)
     int count = 0;
     int index,rN;
     int index_lim = (pow(2,alpha))*(pow(2,alpha));
+	FILE *fp = fopen("log.txt","w");
+	FILE *fp1 = fopen("rinf.txt","w");
     for( yCount = 0; yCount < pow(2,alpha); yCount++)
     {
-        y = areas.low_y + ySize * yCount;
+        y = areas.low_y + ySize * yCount + ySize/2;
         for( xCount = 0; xCount < pow(2,alpha); xCount++)
         {
-            x = areas.low_x + xSize * xCount;
-            Geohash_segGrid_Bin(binStr,xCount,yCount,alpha);
+            x = areas.low_x + xSize * xCount+xSize/2;
+			coorToBin(x,y,binStr);
+			// BintoDec(binstr);
+			printf("x=%f,y=%f,%s\n",x,y,binStr);
+			// sleep(1);
+            // Geohash_segGrid_Bin(binStr,xCount,yCount,alpha);
             Base32_BintoStr(binStr,geostr);
             index = BintoDec(binStr);
             rN    = GetRoomNum(x,y);
-			rooms[rN].grid_list[rooms[rN].grid_num]=index;
-			rooms[rN].grid_num ++;
-            // printf("%d\n",rN);
+			fprintf(fp1,"x=%f,y=%f,rN=%d\n",x,y,rN);
             area_num[index] = rN;
-            if (rN>=0) {
+            if (rN != -1) {
+				fprintf(fp,"x:%f,y:%f,xc:%d,yc:%d == bin=%s,Geohash=%s,decimal base=%d,in room = %d,room grid num = %d,east=%d,south=%d,west=%d,north=%d,\n",x,y,xCount,yCount,binStr,geostr,index,rN,rooms[rN].grid_num,grids[index].east,grids[index].south,grids[index].west,grids[index].north);
 				strcpy(grids[index].numStr,geostr);
+				grids[index].numDec = index;
+				// printf("x = %f,y= %f,in room num:%d\n",x,y,rN);
 				grids[index].areaNum   = rN;
 				grids[index].x         = x;
 				grids[index].y         = y;	
 				grids[index].areaCount = rooms[rN].grid_num;
+				rooms[rN].grid_list[rooms[rN].grid_num]=index;
+				
                 inWall(x,y,rN,index);
+				
+				rooms[rN].grid_num ++;
+
             }
-            printf("x:%f,y:%f == Geohash=%s,decimal base=%d\n",x,y, geostr,index);
+            // printf("x:%f,y:%f == Geohash=%s,decimal base=%d\n",x,y, geostr,index);
         }
         
     }
+	fclose(fp1);
+	fclose(fp);  
     return area_num;
 }
 
@@ -1207,7 +1187,6 @@ int Init_Read_txt()
 	pthread_create(&pid1,NULL,Room_information_acquisition,(void *)&file1);
 
 	// pthread_create(&pid1,NULL,Read_Access_Area,(void *)&file1);
- 
 		
 }
 
@@ -1274,12 +1253,17 @@ int* connectedMatrix(int rN,int *mat){
 	// printf("all:%d\n",all);
 	for(i = 0; i < all*all; i++)
         mat[i] = 0;
+
 	for(i_mat = 0; i_mat < all; i_mat++){
-		printf("%d\n",i_mat);
+		// printf("%d\n",i_mat);
 		assignment(i_mat,i_mat,1,mat,all );
 		i_grid = rooms[rN].grid_list[i_mat];
+		printf("--->Geohash=%s,Dec=%d,roomCount=%d,x=%f,y=%f\n",grids[i_grid].numStr,grids[i_grid].numDec,grids[i_grid].areaCount,grids[i_grid].x,grids[i_grid].y);
 		if (grids[i_grid].east==0) {
 			j_grid = CoortoDec(grids[i_grid].x+xSize,grids[i_grid].y);/*东*/
+			printf("---east--->x:%f,y:%f;rN=%d\n",grids[i_grid].x+xSize,grids[i_grid].y,CheckArea(j_grid));
+
+			printf("i:%d,j:%d\n",i_grid,j_grid);
 			if(CheckArea(j_grid)==rN && grids[j_grid].west==0){
 				j_mat = grids[j_grid].areaCount;
 				assignment(i_mat,j_mat,1,mat,all);
@@ -1405,19 +1389,100 @@ int test(void){
 	int *matA;
     matA = (int *)malloc(rooms[0].grid_num*rooms[0].grid_num*sizeof(int));
 	connectedMatrix(0,matA);
-	printf("%d\n",matA[0]);
+	// printf("%d\n",matA[0]);
 	return 0;
 }
 
 int canGet(void){
 	int rN,accesstime,row,i,j,i_grid,j_grid;
 	int *matA,*tmp,*matB;
-    char *key1,*key2;	
+    char *key1,*key2;
+	puts("####################开始计算可达表####################");	
+	for(rN = 0; rN < 1; rN++)
+	{
+		matA = (int *)malloc(rooms[rN].grid_num*rooms[rN].grid_num*sizeof(int));
+		connectedMatrix(rN,matA);
+		row = rooms[rN].grid_num;
+		// FILE *fp = fopen("mat.txt","w");
+		// fputs("a",fp);
+		// if (rN==0)
+		// {
+		// 	for(int ip = 0; ip < row*row; ip++)
+		// 	{
+		// 		printf("%d,",matA[ip]);
+		// 		if ((ip+1)%row==0)
+		// 		{
+		// 			printf("##\n");
+		// 		}
+		// 	}
+			
+		// }
+		// fclose(fp);
+		// printf("%d\n",row);
+		// for(int time = 0; time < STEP; time++){
+			
+		// 	if (time==0) {
+		// 		matB = (int *)malloc(row*row*sizeof(int));
+		// 		tmp  = (int *)malloc(row*row*sizeof(int));
+		// 		memcpy(matB,matA,sizeof(int)*row*row);
+		// 		memcpy(tmp ,matA,sizeof(int)*row*row);
+		// 	}
+		// 	else {
+		// 		dot(matA,matB,row,row,row,row,tmp);
+		// 		memcpy(matB,tmp,sizeof(int)*row*row);
+		// 	}
+		// 	accesstime = ((int)(time/4))+1;
+		// 	for(i = 0; i < row; i++){
+		// 		for(j = 0; j < row; j++){
+		// 			i_grid = rooms[rN].grid_list[i];
+		// 			key1 = grids[i_grid].numStr;
+        //             if (i != j && tmp[i*row+j]>0){
+		// 				j_grid = rooms[rN].grid_list[j];
+		// 				key2 = grids[j_grid].numStr;
+		// 				// printf("%s,%s\n",key1,key2);
+		// 				// printf("%d,%d\n",i_grid,j_grid);
+		// 				hash_insert(key1,key2,accesstime);
+		// 				// sleep(1000);
+		// 			}					
+		// 		}				
+		// 	}
+		// }
+		// free(tmp);
+		// free(matA);
+		// free(matB);
+		
+	}
+	puts("####################可达表计算结束####################");
+	
+
+}
+
+int canGet1(void){
+	int rN,accesstime,row,i,j,i_grid,j_grid;
+	int *matA,*tmp,*matB;
+    char *key1,*key2;
+	puts("####################开始计算可达表####################");	
 	for(rN = 0; rN < ROOM_QUANT; rN++)
 	{
 		matA = (int *)malloc(rooms[rN].grid_num*rooms[rN].grid_num*sizeof(int));
 		connectedMatrix(rN,matA);
 		row = rooms[rN].grid_num;
+		// FILE *fp = fopen("mat.txt","w");
+		// fputs("a",fp);
+		// if (rN==0)
+		// {
+		// 	for(int ip = 0; ip < row*row; ip++)
+		// 	{
+		// 		printf("%d,",matA[ip]);
+		// 		if ((ip+1)%row==0)
+		// 		{
+		// 			printf("##\n");
+		// 		}
+		// 	}
+			
+		// }
+		// fclose(fp);
+		// printf("%d\n",row);
 		for(int time = 0; time < STEP; time++){
 			
 			if (time==0) {
@@ -1435,19 +1500,23 @@ int canGet(void){
 				for(j = 0; j < row; j++){
 					i_grid = rooms[rN].grid_list[i];
 					key1 = grids[i_grid].numStr;
-                    if (tmp[i*row+j]>0){
+                    if (i != j && tmp[i*row+j]>0){
 						j_grid = rooms[rN].grid_list[j];
-						key2 = grids[j_grid].numStr;						
+						key2 = grids[j_grid].numStr;
+						// printf("%s,%s\n",key1,key2);
+						// printf("%d,%d\n",i_grid,j_grid);
 						hash_insert(key1,key2,accesstime);
+						// sleep(1000);
 					}					
 				}				
 			}
-			
 		}
 		free(tmp);
 		free(matA);
 		free(matB);
+		
 	}
+	puts("####################可达表计算结束####################");
 	
 
 }
@@ -1751,23 +1820,50 @@ int main()
 	
 	Init_HashTable();
 	// Init_Read_txt();
-	char filename1[] = "area.txt";
-	char filename2[] = "room.txt";
-	Area_information_acquisition((void *)&filename1);
-	Room_information_acquisition((void *)&filename2);
+	char areafile[] = "areananshan.txt";
+	char roomfile[] = "roomnanshan.txt";
+	// char areafile[255];
+	// char roomfile[255];
+	// printf("Input the filename of all area information txt:");
+	// scanf("%s",&areafile); 
+	// printf("Input the filename of all room information txt:");
+	// scanf("%s",&roomfile); 
+	Area_information_acquisition((void *)&areafile);
+	Room_information_acquisition((void *)&roomfile);
+    xSize = (areas.top_x-areas.low_x)/pow(2,alpha);
+    ySize = (areas.top_y-areas.low_y)/pow(2,alpha);	
+	printf("area:low_x=%f,low_y=%f,top_x=%f,top_y=%f\n",areas.low_x,areas.low_y,areas.top_x,areas.top_y);
 	Geohash_Grid();
-
-	canGet(); 
-	Init_Route();
+	// canGet(); 
+	// test();
+	// puts("Geohash=75f,Dec=3678,roomCount=25,x=0.455297,y=-8.082750");
+	// printf("rN = %d\n",CoortoDec(0.455297,-8.082750));
+	// puts("x:26.353500,y:-21.854750,xc:96,yc:14");
+	char s1[10];
+	char s2[10];
+	coorToBin(0.743055,-23.361063,s1);
+	puts("#####################");
+	coorToBin(1.318570,-23.361063,s2);
+	Geohash_segGrid_Bin(s2,96,14,alpha);
+	puts("");
+	printf("0.743055,-23.361063;%s\n",s1);
+	printf("1.318570,-23.361063;%s\n",s2);
+	// for(int i = 0; i < ROOM_QUANT; i++)
+	// {
+	// 	printf("room%d has %d grid\n",i,rooms[i].grid_num);
+	// }
+	
+	// Init_Route();
 
 	// display_hash_table();
 	
-	/* 初始化线程池，开启THREAD_NUM条工作线程 */ 
-	threadpool_t *pool = init(THREAD_NUM);	
-	/* 直到接收线程停止，程序终止 */ 
-	pthread_join(pool->rec_tid,NULL);
+	// /* 初始化线程池，开启THREAD_NUM条工作线程 */ 
+	// threadpool_t *pool = init(THREAD_NUM);	
+	// /* 直到接收线程停止，程序终止 */ 
+	// pthread_join(pool->rec_tid,NULL);
 	
 }
+
 
 
 
