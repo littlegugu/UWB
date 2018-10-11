@@ -2000,19 +2000,50 @@ int assignmentDouble(int row,int col,double value,double * mat,int all)
 // double Route_Dist
 
 double* Route_Mat(double *mat){
+	int i,j,rN,pN,rN1;
+	double value;
+	mat = (double *)malloc(door_num*door_num*sizeof(double));
+	for(i = 0; i < door_num*door_num; i++)
+		mat[i]=-1.0;
+	for(rN = 0; rN < ROOM_QUANT; rN++)
+	{
+		if (rooms[rN].room_type==2)
+		{	
+			for(i = 0; i < rooms[rN].pass_num; i++)
+			{
+				for(j = 0; j < rooms[rN].pass_num; j++)
+				{
+					// printf("%d,%d\n",i,j);
+					value = Distf(rooms[i].cer_x,rooms[i].cer_y,rooms[j].cer_x,rooms[j].cer_y);
+					assignmentDouble(rooms[i].door_num,rooms[j].door_num,value,mat,door_num);
+					// printf("doornum:%d;doornum:%d;%f\n",rooms[i].door_num,rooms[j].door_num,value);
+				}
+			}
+			for( pN = 0; pN < rooms[rN].pass_num; pN++)
+			{
+				rN1 = rooms[rN].pass[pN];
+				value = Distf(rooms[rN].cer_x,rooms[rN].cer_y,rooms[rN1].cer_x,rooms[rN1].cer_y);
+				assignmentDouble(rooms[rN].door_num,rooms[rN1].door_num,value,mat,door_num);		
+			}				
+			
+		}	
+	}
+	return mat;		
+}
+
+double* Route_Mat1(double *mat){
 	int i,j,rN,pN,rN1,pN1,rN2,pN2;
 	double value;
 	mat = (double *)malloc(door_num*door_num*sizeof(double));
 	for(i = 0; i < door_num*door_num; i++)
 		mat[i]=-1.0;
-	puts("ok");
+	// puts("ok");
 	for(rN = 0; rN < ROOM_QUANT; rN++)
 	{
-		printf("%d\n",rN);
+		// printf("%d\n",rN);
 		if (rooms[rN].room_type==2)
 		{
-			puts("hh");
-			printf("%d\n",rooms[rN].pass_num);
+			// printf("pass_num=%d\n",rooms[rN].pass_num);
 			for( pN = 0; pN < rooms[rN].pass_num; pN++)
 			{
 				rN1 = rooms[rN].pass[pN];
@@ -2026,7 +2057,7 @@ double* Route_Mat(double *mat){
 }
 
 int Min_Dij(double * list){
-	int min_num= list[0];
+	double min_num= list[0];
 	int index;
 	for(int i = 0; i < door_num; i++)
 	{
@@ -2041,36 +2072,35 @@ int Min_Dij(double * list){
 }
 
 double * Update_Dijkstra(double * list,double *mat,int index, double dist){
+	printf("update:");
 	for(int i = 0; i < door_num; i++)
 	{
 		if(mat[index+i*door_num]>0 && (list[i]==-1 || (list[i]>0  && dist+mat[i+index*door_num]<list[index]))){
 			list[i]=dist+mat[i+index*door_num];
-			printf("%d->%f\n",i,list[i]);
 		}
-	}
-	printf("update list");
-	for(int i = 0; i < door_num; i++)
-	{
 		printf("%f,",list[i]);
 	}
-	puts("");
+	printf("\n");
 	return list;
 }
 
 double* dijkstra(double *mat,int sa){
 	double list[door_num],dist;
 	int index;
-	printf("begin:%d\n",sa);
-	
 	for(int i = 0; i < door_num; i++)
 	{
+		if(i==sa){
+			list[i]=-2;
+		}else{
+			list[i]=mat[i+sa*door_num];
+		}
 		
-		list[i]=mat[i+sa*door_num];
 	}
 	index = Min_Dij(list);
+	// printf("%f\n",list[index]);
 	while (list[index]>0)
 	{
-		printf("%f,%d\n",list[index],index);
+		// printf("%f,%d\n",list[index],index);
 		route_table[rt_count].SourAddr = sa;
 		route_table[rt_count].TargAddr = index;
 		route_table[rt_count].dist     = list[index];
@@ -2078,6 +2108,7 @@ double* dijkstra(double *mat,int sa){
 		list[index] = -2;
 		Update_Dijkstra(list,mat,index,dist);
 		index = Min_Dij(list);
+		printf("%f,%d\n",list[index],index);
 		rt_count++;
 	}
 
@@ -2086,8 +2117,6 @@ double* dijkstra(double *mat,int sa){
 int Init_Route(void){
 	double *mat = NULL;
 	mat = Route_Mat(mat);
-	printf("size:%d\n",sizeof(mat));
-	printf("row:%d\n",door_num);
 	for(int i = 0; i < door_num*door_num; i++)
 	{
 		printf("%f,",mat[i]);
@@ -2098,9 +2127,10 @@ int Init_Route(void){
 	}
 	
 	// for(int i = 0; i < door_num; i++)
-	// {
-	// 	dijkstra(mat,i);
-	// }
+	for(int i = 0; i < 1; i++)
+	{
+		dijkstra(mat,i);
+	}
 
 }
 
@@ -2125,13 +2155,19 @@ int main()
 	Room_information_acquisition((void *)&roomfile);
 	Passageway_Information_Acquisition((void *)&passfile);
 	
-	for(int  i = 0; i < rooms[13].pass_num; i++)
-	{
-		printf("%d\n",rooms[13].pass[i]);
-	}
+	// for(int  i = 0; i < rooms[13].pass_num; i++)
+	// {
+	// 	printf("%d\n",rooms[13].pass[i]);
+	// }
 	
 	// Geohash_Grid_Seg();
 	Init_Route();
+	printf("route num£»%d\n",rt_count);
+	puts("-----route------");
+	for(int i = 0; i < rt_count; i++)
+	{
+		printf("%d,%d,%f\n",route_table[i].SourAddr,route_table[i].TargAddr,route_table[i].dist);
+	}
     // xSize = (areas.top_x-areas.low_x)/pow(2,alpha);
     // ySize = (areas.top_y-areas.low_y)/pow(2,alpha);	
 	// printf("area:low_x=%f,low_y=%f,top_x=%f,top_y=%f\n",areas.low_x,areas.low_y,areas.top_x,areas.top_y);
