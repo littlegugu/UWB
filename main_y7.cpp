@@ -1,10 +1,10 @@
 #include <stdio.h>
-#include "pthread.h"
+// #include <pthread.h>
 #include <winsock2.h>
 #include <stdlib.h>
 #include <unistd.h>	
 #include <sched.h>
-#include <string>
+#include <string.h>
 #include <time.h>
 #include <math.h>
 #include "cJSON.c"
@@ -308,7 +308,7 @@ int Min_Dij(double * list){
 	int index;
 	for(int i = 0; i < door_num; i++)
 	{
-		if ((list[i]>=0 && min_num <0) ||(list[i]>=0 &&list[i]<min_num))
+		if ((list[i]>=0 && min_num <0) ||(list[i]>=0 && list[i]<min_num))
 		{
 			min_num = list[i];
 			index = i;
@@ -323,7 +323,7 @@ double * Update_Dijkstra(double * list,double *mat,int index, double dist){
 	{
 		if(mat[index+i*door_num]>0 && (list[i]==-1 || (list[i]>0  && dist+mat[i+index*door_num]<list[index]))){
 			list[i]=dist+mat[i+index*door_num];
-			printf("%d->%f\n",i,list[i]);
+			// printf("%d->%f\n",i,list[i]);
 		}
 	}
 	printf("update list");
@@ -437,6 +437,7 @@ HashNode *hash_search(const char *key)
 		}
 	}
 	
+	puts("NULL");
 	return NULL;
 }
 
@@ -467,7 +468,7 @@ void hash_insert(const char* key,char *accessKey,int accessTime)
     /* 创建新的节点 */
     if(flag)
     {
-        printf("Not exist:%s ! \n",key);
+        // printf("Not exist:%s ! \n",key);
         HashNode *newNode = (HashNode *)malloc(sizeof(HashNode));
         memset(newNode,0,sizeof(HashNode));
         newNode->key = (char *)malloc(sizeof(char)*(strlen(key)+1));
@@ -488,7 +489,7 @@ void hash_insert(const char* key,char *accessKey,int accessTime)
    /* 在原有节点上操作 */ 
     else
     {
-        printf("Already has key:%s ! \n",key);
+        // printf("Already has key:%s ! \n",key);
         Access *as = hash_search(key)->access;
         int asflag = 1;
         while (as)
@@ -519,7 +520,7 @@ void hash_insert(const char* key,char *accessKey,int accessTime)
         }
     }
     
-    printf("The size of HashTable is %d now! \n",hash_table_size);
+    // printf("The size of HashTable is %d now! \n",hash_table_size);
 } 
 
 
@@ -784,21 +785,31 @@ float drift(int tag_pos,int dt){
     char * key   = tags[tag_pos].pri_grid;
     char * askey = tags[tag_pos].cur_grid;
     if(area_cur < 0 || area_pri < 0 ){
+		// puts("a");
         return 0.0;
     }else if(area_cur == area_pri){
-        Access *as = hash_search(key)->access;
-        while (as)
-        {
-            if (strcmp(as->key,askey) == 0)
-            {
-                if (as->time >= dt)
-                    return 1;
-                else 
-                    return 0.2;
-            }
-            as = as->next;
-        }
+		// puts("b");
+        if(hash_search(key)!=NULL)
+		{
+			Access *as = hash_search(key)->access;
+			while (as)
+					{
+						if (strcmp(as->key,askey) == 0)
+						{
+							if (as->time >= dt)
+								return 1.0;
+							else 
+								return 0.0;
+								// return 0;
+						}
+						as = as->next;
+					}
+		}
+      
+		// puts("0.0");
+		return 0.0;
     }else{
+		// puts("c");
 		double sp = Search_Route(area_cur,area_pri)/dt;
 		
 		if (sp<=SPEED_LIM) {
@@ -810,7 +821,7 @@ float drift(int tag_pos,int dt){
 		
         return 0;
     }
-
+	
 }
 
 
@@ -821,6 +832,7 @@ float drift(int tag_pos,int dt){
 /* 解析传来的字符串 */ 
 char * resolve_str(char *data)
 {
+	printf("%s \n",data);
     /* 用cJSON解析 */ 
     cJSON *json = cJSON_Parse(data);
     if(json)	//解析成功  
@@ -833,8 +845,11 @@ char * resolve_str(char *data)
         char *id = cJSON_GetObjectItem(json, "tagid")->valuestring;	/* id */ 
         double x = cJSON_GetObjectItem(json, "x")->valuedouble;	/* x */ 
         double y = cJSON_GetObjectItem(json, "y")->valuedouble;	/* y */ 
-        char *time_str = cJSON_GetObjectItem(json, "time")->valuestring;	/* time */ 
-        long long time = timestamp(time_str);
+        // char *time_str = cJSON_GetObjectItem(json, "time")->valuestring;	/* time */ 
+        // long long time = timestamp(time_str);
+		char *time_str = cJSON_GetObjectItem(json, "time")->valuestring;  
+
+		long int time = atol(time_str);		
         /* 在手环数组寻找手环 */ 
         for(i=0;i<TAG_SIZE;i++)
         {
@@ -926,6 +941,7 @@ char * resolve_str(char *data)
                 if(dt<TIME_LIM){
                     puts("时间差小于10s");
                     confidentDegree = drift(i,dt)*100;
+					// confidentDegree = 1;
                 }else{
                     puts("时间差大于10s");
                     confidentDegree = 0;
@@ -935,13 +951,16 @@ char * resolve_str(char *data)
         }
         cJSON_AddNumberToObject(json,"cd",confidentDegree);
         char *jsonStr = cJSON_Print(json);
+		cJSON_Delete(json);
         printf("置信度=%.2f \n",confidentDegree);
         printf("\n");
         return jsonStr;	
-    }
+    }else{
+		return NULL;
+	}
     // puts("pp");
     
-    return data;
+    return NULL;
 }
 
 
@@ -949,9 +968,6 @@ char *ReadData(FILE *fp,char *buf)
 {
 	return fgets(buf,LINE,fp);
 }
-
-
-
 
 /*分割txt字符串*/
 double * split(char * data,double *list)
@@ -1402,12 +1418,12 @@ int* connectedMatrix(int rN,int *mat){
 		// printf("%d\n",i_mat);
 		assignment(i_mat,i_mat,1,mat,all );
 		i_grid = rooms[rN].grid_list[i_mat];
-		printf("--->Geohash=%s,Dec=%d,roomCount=%d,x=%f,y=%f\n",grids[i_grid].numStr,grids[i_grid].numDec,grids[i_grid].areaCount,grids[i_grid].x,grids[i_grid].y);
+		// printf("--->Geohash=%s,Dec=%d,roomCount=%d,x=%f,y=%f\n",grids[i_grid].numStr,grids[i_grid].numDec,grids[i_grid].areaCount,grids[i_grid].x,grids[i_grid].y);
 		if (grids[i_grid].east==0) {
 			j_grid = CoortoDec(grids[i_grid].x+xSize,grids[i_grid].y);/*??*/
-			printf("---east--->x:%f,y:%f;rN=%d\n",grids[i_grid].x+xSize,grids[i_grid].y,CheckArea(j_grid));
+			// printf("---east--->x:%f,y:%f;rN=%d\n",grids[i_grid].x+xSize,grids[i_grid].y,CheckArea(j_grid));
 
-			printf("i:%d,j:%d\n",i_grid,j_grid);
+			// printf("i:%d,j:%d\n",i_grid,j_grid);
 			if(CheckArea(j_grid)==rN && grids[j_grid].west==0){
 				j_mat = grids[j_grid].areaCount;
 				assignment(i_mat,j_mat,1,mat,all);
@@ -1636,7 +1652,7 @@ void *func_process(void *thr_pool)
 		/* 处理刚取出的数据 */ 
 		  
 		char *result = resolve_str(a_data);
-		
+
 		if(result!=NULL)
 			sendto(udpclient,result, strlen(result), 0, (sockaddr *)&sin, len);	//发送udp包 
 		
@@ -1943,7 +1959,7 @@ void * Passageway_Information_Acquisition(void *arg){
 					rooms[rN].low_y = buflist[4];
 					rooms[rN].room_type = 2;
 					count++;
-					printf("--->room%d:top_x=%f,low_x=%f,top_y=%f,low_y=%f\n",rN,rooms[rN].top_x,rooms[rN].low_x,rooms[rN].top_y,rooms[rN].low_y);/*???????????????*/
+					// printf("--->room%d:top_x=%f,low_x=%f,top_y=%f,low_y=%f\n",rN,rooms[rN].top_x,rooms[rN].low_x,rooms[rN].top_y,rooms[rN].low_y);/*???????????????*/
 				}
 				else if(count==1) {
 					int list[7];
@@ -2014,48 +2030,20 @@ int main()
 	Room_information_acquisition((void *)&roomfile);
 	Passageway_Information_Acquisition((void *)&passfile);
 	Init_Route();
-	puts("-----route------");
-	for(int i = 0; i < rt_count; i++)
-	{
-		printf("%d,%d,%f\n",route_table[i].SourAddr,route_table[i].TargAddr,route_table[i].dist);
-	}
-	
-	// printf("%d\n",rooms[14].pass_num);
-	// for(int i = 0; i < rooms[14].pass_num; i++)
+	// puts("-----route------");
+	// for(int i = 0; i < rt_count; i++)
 	// {
-	// 	printf("--->%d\n",rooms[14].pass[i]);
+	// 	printf("%d,%d,%f\n",route_table[i].SourAddr,route_table[i].TargAddr,route_table[i].dist);
 	// }
-	
-	// Get_Route_Dist(0,8);
-	// Get_Route_Dist(13,8);
-	Geohash_Grid_Seg();
+	Geohash_Grid();
 	canGet(); 
-	// test();
-	// puts("Geohash=75f,Dec=3678,roomCount=25,x=0.455297,y=-8.082750");
-	// printf("rN = %d\n",CoortoDec(0.455297,-8.082750));
-	// puts("x:26.353500,y:-21.854750,xc:96,yc:14");
-	// char s1[10];
-	// char s2[10];
-	// coorToBin(42.755695,26.992812,s1);
-	// puts("#####################");
-	// coorToBin(43.331211,26.992812,s2);
-	// puts("");
-	// printf("42.755695,26.992812;%s\n",s1);
-	// printf("43.331211,26.992812;%s\n",s2);
-	// printf("area:low_x=%f,low_y=%f,top_x=%f,top_y=%f\n",areas.low_x,areas.low_y,areas.top_x,areas.top_y);
-	// for(int i = 0; i < ROOM_QUANT; i++)
-	// {
-	// 	printf("room%d has %d grid\n",i,rooms[i].grid_num);
-	// }
-	
-	// Init_Route();
 
 	// display_hash_table();
 	
-	// /* 初始化线程池，开启THREAD_NUM条工作线程 */ 
-	// threadpool_t *pool = init(THREAD_NUM);	
-	// /* 直到接收线程停止，程序终止 */ 
-	// pthread_join(pool->rec_tid,NULL);
+	/* 初始化线程池，开启THREAD_NUM条工作线程 */ 
+	threadpool_t *pool = init(THREAD_NUM);	
+	/* 直到接收线程停止，程序终止 */ 
+	pthread_join(pool->rec_tid,NULL);
 	
 }
 
