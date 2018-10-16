@@ -30,11 +30,12 @@
 #define BASE32_LAY_LEN 5 /*Geohash字符编码最大长度*/
 #define BASE32_MIN_LEN 8 /*BASE32每层网络的字符长度，多少个二进编码为一个字符*/
 #define GRID_QUANT 20000 /*栅格数量*/
-#define STEP 30 /*步数*/
+// #define STEP 30 /*步数*/
+#define STEP 10 /*步数*/
 #define SMO_SIZE 10
 #define TIME_LIM 10
 #define SPEED_LIM 4
-#define ROUTE_QUANT 50
+#define ROUTE_QUANT 120
 #define DOOR_QUANT 15
 
 static const char base32_alphabet[32] = {
@@ -128,6 +129,7 @@ typedef struct Room{
 	int grid_list[300];
 	int pass[10];
 	int pass_num;
+	char door_grid[3];
 };
 
 typedef struct Area{
@@ -206,8 +208,7 @@ int area_num[GRID_QUANT];
 int now_tag = 0;
 struct Route route_table[ROUTE_QUANT];/*路由表数组*/
 int door_counter = 0;
-int rt_count = 0;
-
+int   rt_counter=0;
 void reconnect()
 {
 	tcp_client = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
@@ -303,82 +304,113 @@ double* Route_Mat(double *mat){
 	return mat;
 }
 
-int Min_Dij(double * list){
-	int min_num= list[0];
-	int index;
-	for(int i = 0; i < door_counter; i++)
-	{
-		if ((list[i]>=0 && min_num <0) ||(list[i]>=0 && list[i]<min_num))
-		{
-			min_num = list[i];
-			index = i;
-		}
-	}
-	return index;
-	
-}
 
-double * Update_Dijkstra(double * list,double *mat,int index, double dist){
-	for(int i = 0; i < door_counter; i++)
-	{
-		if(mat[index+i*door_counter]>0 && (list[i]==-1 || (list[i]>0  && dist+mat[i+index*door_counter]<list[index]))){
-			list[i]=dist+mat[i+index*door_counter];
-			// printf("%d->%f\n",i,list[i]);
-		}
-	}
-	// printf("update list");
-	// for(int i = 0; i < door_num; i++)
-	// {
-	// 	printf("%f,",list[i]);
-	// }
-	// puts("");
-	return list;
-}
 
-double* dijkstra(double *mat,int sa){
-	double list[door_counter],dist;
-	int index;
-	// printf("begin:%d\n",sa);
-	
-	for(int i = 0; i < door_counter; i++)
-	{
-		
-		list[i]=mat[i+sa*door_counter];
-	}
-	index = Min_Dij(list);
-	while (list[index]>0)
-	{
-		// printf("%f,%d\n",list[index],index);
-		route_table[rt_count].SourAddr = sa;
-		route_table[rt_count].TargAddr = index;
-		route_table[rt_count].dist     = list[index];
-		dist = list[index];
-		list[index] = -2;
-		Update_Dijkstra(list,mat,index,dist);
-		index = Min_Dij(list);
-		rt_count++;
-	}
+int Min_Dij(double *list,int len){
+    double min_value = list[0];
+    int    index = 0,i;
+    for(i = 0; i < len; i++)
+    {
+        if (min_value<0)
+        {
+            if (list[i]>=0)
+            {
+                min_value = list[i];
+                index     = i;
+                // printf("first,%f,%d\n",min_value,i);
+            }
+        }else{
+            if (min_value>list[i] && list[i]>=0)
+            {
+                min_value = list[i];
+                index     = i;  
+                // printf("second,%f,%d\n",min_value,i);              
+            }
+        }
+    }
+    return index;
 
 }
 
-int Init_Route(void){
+
+
+void Update_Dij(double *list,double *mat,int p,double dist){
+    int i;
+    for(i = 0; i < door_counter; i++)
+    {
+        if (mat[door_counter*p+i]>0)
+        {
+            if (list[i] > dist+mat[door_counter*p+i] || list[i]==-1)
+            {
+                // printf("->update %d,value:%f,up value:%f \n",i,list[i],dist+mat[door_counter*p+i]);
+                list[i] = dist+mat[door_counter*p+i];
+            }
+            
+        }
+    }
+    
+}
+
+double Route_Search(int sa,int ta){
+    int i;
+    double dist;
+    for(i = 0; i < rt_counter; i++)
+    {
+        if((route_table[i].SourAddr==sa && route_table[i].TargAddr==ta)||(route_table[i].SourAddr==ta && route_table[i].TargAddr==sa)) 
+        {
+            return route_table[i].dist;
+        }
+
+    }
+    return -1.0;
+}
+
+void Dijkstra(int index,double *mat){
+    int i,index_min;
+    double list[door_counter],dist_list[door_counter];
+    double dist_value;
+    for(i = 0; i < door_counter; i++)
+    {
+        list[i] = mat[index*door_counter + i];/*赋值临时t*/
+        if (i==index)
+        {
+            list[i]=-2.0;
+        }
+    }
+    index_min  = Min_Dij(list,door_counter);
+    dist_value = list[index_min];
+    while(dist_value>=0){
+        if(Route_Search(index,index_min)==-1){
+            route_table[rt_counter].SourAddr = index;
+            route_table[rt_counter].TargAddr = index_min;
+            route_table[rt_counter++].dist     = dist_value;
+        }
+        list[index_min]      = -2.0;
+        Update_Dij(list,mat,index_min,dist_value);
+        index_min  = Min_Dij(list,door_counter);
+        dist_value = list[index_min];
+    }
+}
+
+int Init_Route_Table(void){
 	double *mat = NULL;
+	int i;
 	mat = Route_Mat(mat);
 	
-	for(int i = 0; i < door_counter*door_counter; i++)
-	{
-		printf("%f,",mat[i]);
-		if ((i+1)%door_counter==0)
-		{
-			puts("");
-		}
-	}
-	
-	// for(int i = 0; i < door_num; i++)
+	// for(i = 0; i < door_counter*door_counter; i++)
 	// {
-	// 	dijkstra(mat,i);
+	// 	printf("%f,",mat[i]);/*打印矩阵*/
+	// 	if ((i+1)%door_counter==0)
+	// 	{
+	// 		puts("");
+	// 	}
 	// }
-	// puts("Routing table initialization completed.");
+    for(i = 0; i <  door_counter; i++)
+    {
+        Dijkstra(i,mat);
+        // printf("ok %d\n",i);
+    }	
+	puts("Routing table initialization completed.");
 
 }
 
@@ -437,7 +469,7 @@ HashNode *hash_search(const char *key)
 		}
 	}
 	
-	puts("NULL");
+	// puts("NULL");
 	return NULL;
 }
 
@@ -667,31 +699,71 @@ int CoorToBin(double x,double y,char *str){
 
 
 /*用base32将二进制字符串转成字符串*/
-char* base32_encode(char *bin_source,char * code)
+// char* Base32_BintoStr(char *bin_source,char * code)
+// {
+//     char *tmpchar;
+//     int   num;
+//     int   count = 0;
+//     int   codeDig;
+//     tmpchar   = (char *)malloc( BASE32_LAY_LEN *sizeof(char));
+//     complement(bin_source,BASE32_MIN_LEN);/*若二进制字符串长度小于8，补位*/
+//     for(int i = 0; i < strlen(bin_source) ;  i+=BASE32_LAY_LEN)
+//     {	
+//         strncpy(tmpchar, bin_source+i, BASE32_LAY_LEN);
+//         tmpchar[BASE32_LAY_LEN]= '\0';
+//         complement(tmpchar,BASE32_LAY_LEN);/*若最后一层字符串长度小于5，补位*/
+//         num           = binToDec(tmpchar);
+//         code[count++] = base32_alphabet[num];
+//     }
+//     if (strlen(bin_source)%5 != 0)
+//         codeDig = strlen(bin_source)/5+1;
+//     else
+//         codeDig = strlen(bin_source)/5;
+//     code[codeDig]='\0';
+//     free(tmpchar);
+//     return code;
+// }
+
+
+int BintoDec(char * binStr)
 {
-    char *tmpchar;
-    int   num;
-    int   count = 0;
-    int   codeDig;
-    tmpchar   = (char *)malloc( BASE32_LAY_LEN *sizeof(char));
-    complement(bin_source,BASE32_MIN_LEN);/*若二进制字符串长度小于8，补位*/
-    for(int i = 0; i < strlen(bin_source) ;  i+=BASE32_LAY_LEN)
-    {	
-        strncpy(tmpchar, bin_source+i, BASE32_LAY_LEN);
-        tmpchar[BASE32_LAY_LEN]= '\0';
-        complement(tmpchar,BASE32_LAY_LEN);/*若最后一层字符串长度小于5，补位*/
-        num           = binToDec(tmpchar);
-        code[count++] = base32_alphabet[num];
-    }
-    if (strlen(bin_source)%5 != 0)
-        codeDig = strlen(bin_source)/5+1;
-    else
-        codeDig = strlen(bin_source)/5;
-    code[codeDig]='\0';
-    free(tmpchar);
-    return code;
+	int decInt;	
+	int sum   = 0;
+	int j     = strlen(binStr)-1;
+	for(int i = 0; i < strlen(binStr); i++)
+	{
+		decInt =  (int) binStr[i] - '0';
+		sum    += decInt*(pow(2,j--));
+	}
+	return sum;
 }
 
+void Base32_BintoStr(char *bin_source,char * code)
+{
+	char tmpchar[BASE32_LAY_LEN];
+	int   num;
+	int   count = 0;
+	int   codeDig;
+	// tmpchar     = (char *)malloc(BASE32_LIM);
+    // tmpchar   = (char *)malloc( BASE32_LAY_LEN *sizeof(char));
+	complement(bin_source,BASE32_MIN_LEN);
+	for(int i = 0; i < strlen(bin_source) ;  i+=BASE32_LAY_LEN)
+	{	
+		strncpy(tmpchar, bin_source+i, BASE32_MIN_LEN);
+		tmpchar[BASE32_LAY_LEN]= '\0';
+		complement(tmpchar,BASE32_LAY_LEN);
+		num           = BintoDec(tmpchar);
+		code[count++] = base32_alphabet[num];
+	}
+	if (strlen(bin_source)%5 != 0)
+		codeDig = strlen(bin_source)/5+1;
+	else
+		codeDig = strlen(bin_source)/5;
+	code[codeDig]='\0';
+    // free(tmpchar);
+	// tmpchar = NULL;
+	// return code;
+}
 
 /* 判断手环数据是否平稳 
 ** @param tag_pos int,手环在手环数组的下标 
@@ -725,7 +797,7 @@ int is_steady(int tag_pos)
                     tags[tag_pos].cur_decGrid = binToDec(binstr);
 					tags[tag_pos].cur_grid = (char *)malloc(GEO_STR_LEN*sizeof(char));
 					tags[tag_pos].pri_grid = (char *)malloc(GEO_STR_LEN*sizeof(char));
-                    base32_encode(binstr,tags[tag_pos].cur_grid);
+                    Base32_BintoStr(binstr,tags[tag_pos].cur_grid);
                     return 0;
                 }
                 
@@ -779,45 +851,97 @@ long long timestamp(char * time_str){
 }
 
 
-float drift(int tag_pos,int dt){
+double drift(int tag_pos,int dt){
     int area_cur = area_num[tags[tag_pos].cur_decGrid];
     int area_pri = area_num[tags[tag_pos].cur_decGrid];
     char * key   = tags[tag_pos].pri_grid;
     char * askey = tags[tag_pos].cur_grid;
+	double dist,dists,dist1,dist2;
+	HashNode * hn = NULL;
     if(area_cur < 0 || area_pri < 0 ){
-		// puts("a");
+		/*不可达*/
         return 0.0;
     }else if(area_cur == area_pri){
-		// puts("b");
-        if(hash_search(key)!=NULL)
+		hn = hash_search(key);
+        if(hn!=NULL)
 		{
-			Access *as = hash_search(key)->access;
-			while (as)
-					{
-						if (strcmp(as->key,askey) == 0)
-						{
-							if (as->time >= dt)
-								return 1.0;
-							else 
-								return 0.0;
-								// return 0;
-						}
-						as = as->next;
-					}
+			Access *as = hn->access;
+			while (as){
+				if (strcmp(as->key,askey) == 0)
+				{
+					if (as->time >= dt)
+						return 1.0;
+					else 
+						return 0.0;
+						// return 0;
+				}
+				as = as->next;
+			}
 		}
       
 		// puts("0.0");
 		return 0.0;
     }else{
 		// puts("c");
-		double sp = Search_Route(area_cur,area_pri)/dt;
+		dist = Search_Route(area_cur,area_pri);
+		if (dist<0) {
+			return 0.0;/*域间不可达*/
+		}else {
+			if (dist/dt > SPEED_LIM) {
+				return 0.0;
+			}
+			else {
+				hn = hash_search(key);
+				if(hn!=NULL)
+				{
+					Access *as = hn->access;
+					while (as){
+						if (strcmp(as->key,rooms[area_pri].door_grid) == 0)
+						{
+							if (as->time >= dt)
+								return 0.0;
+							else 
+								dist1 = as->time * SPEED_LIM;
+								break;
+						}
+						as = as->next;
+					}
+				}
+
+				hn = hash_search(askey);
+				if(hn!=NULL)
+				{
+					Access *as = hn->access;
+					while (as){
+						if (strcmp(as->key,rooms[area_cur].door_grid) == 0)
+						{
+							if (as->time >= dt)
+								return 0.0;
+							else 
+								dist2 = as->time * SPEED_LIM;
+								break;
+						}
+						as = as->next;
+					}
+				}
+				
+				if ((dist1+dist+dist2)/dt <=SPEED_LIM ){
+					return 1.0;
+				}
+				else {
+					return 0.0;
+				}
+								
+			}
+			
+		}
 		
-		if (sp<=SPEED_LIM) {
-			return 1;
-		}
-		else {
-			return 0;
-		}
+		// if (sp<=SPEED_LIM) {
+		// 	return 1;
+		// }
+		// else {
+		// 	return 0;
+		// }
 		
         return 0;
     }
@@ -933,11 +1057,11 @@ char * resolve_str(char *data)
                     tags[i].pri_decGrid = tags[i].cur_decGrid;
                     tags[i].cur_decGrid = binToDec(binstr);
                     strcpy(tags[i].pri_grid,tags[i].cur_grid);
-                    base32_encode(binstr,tags[i].cur_grid);
+                    Base32_BintoStr(binstr,tags[i].cur_grid);
                 }else {
                     confidentDegree = -100;
                 }
-                // strcpy(tags[i].cur_grid,base32_encode(binstr));
+                // strcpy(tags[i].cur_grid,Base32_BintoStr(binstr));
                 if(dt<TIME_LIM){
                     puts("时间差小于10s");
                     confidentDegree = drift(i,dt)*100;
@@ -1063,7 +1187,7 @@ void * Room_information_acquisition(void *arg)
 				}else{
 					rooms[rN].room_type=1;/*非区域*/
 				}
-				printf("--->room%d:top_x=%f,low_x=%f,top_y=%f,low_y=%f\n",rN,rooms[rN].top_x,rooms[rN].low_x,rooms[rN].top_y,rooms[rN].low_y);/*???????????????*/
+				printf("--->room%d:top_x=%f,low_x=%f,top_y=%f,low_y=%f,door_cer_x=%f,door_cer_y=%f,type=%d\n",rN,rooms[rN].top_x,rooms[rN].low_x,rooms[rN].top_y,rooms[rN].low_y,rooms[rN].cer_x,rooms[rN].cer_y,rooms[rN].room_type);
 				count = 0;
 				rN ++;
 			}else{
@@ -1180,45 +1304,9 @@ char* Geohash_segGrid_Bin(char *str,int xCount,int yCount,int alpha)
     return str;
 }
 
-int BintoDec(char * binStr)
-{
-	int decInt;	
-	int sum   = 0;
-	int j     = strlen(binStr)-1;
-	for(int i = 0; i < strlen(binStr); i++)
-	{
-		decInt =  (int) binStr[i] - '0';
-		sum    += decInt*(pow(2,j--));
-	}
-	return sum;
-}
 
-char* Base32_BintoStr(char *bin_source,char * code)
-{
-	char *tmpchar;
-	int   num;
-	int   count = 0;
-	int   codeDig;
-	// tmpchar     = (char *)malloc(BASE32_LIM);
-    tmpchar   = (char *)malloc( BASE32_LAY_LEN *sizeof(char));
-	complement(bin_source,BASE32_MIN_LEN);
-	for(int i = 0; i < strlen(bin_source) ;  i+=BASE32_LAY_LEN)
-	{	
-		strncpy(tmpchar, bin_source+i, BASE32_MIN_LEN);
-		tmpchar[BASE32_LAY_LEN]= '\0';
-		complement(tmpchar,BASE32_LAY_LEN);
-		num           = BintoDec(tmpchar);
-		code[count++] = base32_alphabet[num];
-	}
-	if (strlen(bin_source)%5 != 0)
-		codeDig = strlen(bin_source)/5+1;
-	else
-		codeDig = strlen(bin_source)/5;
-	code[codeDig]='\0';
-    free(tmpchar);
-	tmpchar = NULL;
-	return code;
-}
+
+
 
 
 int GetRoomNum(double x,double y)
@@ -1406,7 +1494,6 @@ int* connectedMatrix(int rN,int *mat){
         mat[i] = 0;
 
 	for(i_mat = 0; i_mat < all; i_mat++){
-		// printf("%d\n",i_mat);
 		assignment(i_mat,i_mat,1,mat,all );
 		i_grid = rooms[rN].grid_list[i_mat];
 		// printf("--->Geohash=%s,Dec=%d,roomCount=%d,x=%f,y=%f\n",grids[i_grid].numStr,grids[i_grid].numDec,grids[i_grid].areaCount,grids[i_grid].x,grids[i_grid].y);
@@ -1504,6 +1591,7 @@ int* connectedMatrix(int rN,int *mat){
 			}
 		}
 	}
+	return mat;
 }
 
 
@@ -1538,8 +1626,9 @@ int * dot(int * a_mat, int * b_mat,int a_row,int b_row,int a_col,int b_col,int *
 
 int test(void){
 	int *matA;
-    matA = (int *)malloc(rooms[0].grid_num*rooms[0].grid_num*sizeof(int));
-	connectedMatrix(0,matA);
+	printf("%d\n",rooms[12].grid_num);
+    matA = (int *)malloc(rooms[12].grid_num*rooms[12].grid_num*sizeof(int));
+	connectedMatrix(12,matA);
 	// printf("%d\n",matA[0]);
 	return 0;
 }
@@ -1548,11 +1637,17 @@ int canGet(void){
 	int rN,accesstime,row,i,j,i_grid,j_grid;
 	int *matA,*tmp,*matB;
     char *key1,*key2;
+	char binStr[GEO_BIN_LEN];
 	puts("####################可达表计算开始####################");	
 	for(rN = 0; rN < ROOM_QUANT; rN++)
 	{
 		if(rooms[rN].room_type<2){
+			printf("roomnum:%d\n",rN);
+			// rooms[rN].door_grid = (char *)malloc(3*sizeof(char));
+			CoorToBin(rooms[rN].cer_x,rooms[rN].cer_y,binStr);
+			// Base32_BintoStr(binStr,rooms[rN].door_grid);
 			matA = (int *)malloc(rooms[rN].grid_num*rooms[rN].grid_num*sizeof(int));
+			printf("%d\n",rooms[rN].grid_num);
 			connectedMatrix(rN,matA);
 			row = rooms[rN].grid_num;
 			for(int time = 0; time < STEP; time++){
@@ -1585,6 +1680,7 @@ int canGet(void){
 			free(tmp);
 			free(matA);
 			free(matB);
+			// puts("free");
 		}
 		
 	}
@@ -1592,6 +1688,21 @@ int canGet(void){
 	
 
 }
+
+// void Door_Grid(void){
+// 	char binStr[GEO_BIN_LEN];
+// 	for(int i = 0; i < ROOM_QUANT; i++)
+// 	{
+// 		if (rooms[i].room_type<2)
+// 		{
+// 			rooms[i].door_grid = (char *)malloc(3*sizeof(char));
+// 			CoorToBin(rooms[i].cer_x,rooms[i].cer_y,binStr);
+// 			Base32_BintoStr(binStr,rooms[i].door_grid);
+// 			printf("%s\n",rooms[i].door_grid)			;
+// 		}
+// 	}
+	
+// }
 
 
 
@@ -1643,7 +1754,6 @@ void *func_process(void *thr_pool)
 		pthread_cond_broadcast(&(pool->queue_not_full));
 		
 		/* 处理刚取出的数据 */ 
-		  
 		char *result = resolve_str(a_data);
 
 		if(result!=NULL)
@@ -1941,6 +2051,7 @@ void * Passageway_Information_Acquisition(void *arg){
 			// printf("%s",buf);
 			if (buf[0]=='#') {
 				count=0;
+				printf("--->room%d:top_x=%f,low_x=%f,top_y=%f,low_y=%f,door_cer_x=%f,door_cer_y=%f\n",rN,rooms[rN].top_x,rooms[rN].low_x,rooms[rN].top_y,rooms[rN].low_y,rooms[rN].cer_x,rooms[rN].cer_y);
 			}else {
 				
 				if (count==0) {
@@ -1952,7 +2063,9 @@ void * Passageway_Information_Acquisition(void *arg){
 					rooms[rN].low_y = buflist[4];
 					rooms[rN].room_type = 2;
 					count++;
-					printf("--->room%d:top_x=%f,low_x=%f,top_y=%f,low_y=%f\n",rN,rooms[rN].top_x,rooms[rN].low_x,rooms[rN].top_y,rooms[rN].low_y);/*???????????????*/
+					// printf("--->room%d:top_x=%f,low_x=%f,top_y=%f,low_y=%f\n",rN,rooms[rN].top_x,rooms[rN].low_x,rooms[rN].top_y,rooms[rN].low_y);/*???????????????*/
+					
+
 				}
 				else if(count==1) {
 					int list[7];
@@ -1979,7 +2092,7 @@ void * Passageway_Information_Acquisition(void *arg){
 					split(buf,buflist);
 					rooms[rN].door_quants++;
 					rooms[rN].cer_x = (buflist[1]+buflist[2])/2;
-					rooms[rN].cer_x = (buflist[3]+buflist[4])/2;
+					rooms[rN].cer_y = (buflist[3]+buflist[4])/2;
 					rooms[rN].door_num = door_counter++;
 				}
 				
@@ -2017,21 +2130,23 @@ int main()
 	Area_information_acquisition((void *)&areafile);
 	Room_information_acquisition((void *)&roomfile);
 	Passageway_Information_Acquisition((void *)&passfile);
-	Init_Route();
-	// puts("-----route------");
-	// for(int i = 0; i < rt_count; i++)
-	// {
-	// 	printf("%d,%d,%f\n",route_table[i].SourAddr,route_table[i].TargAddr,route_table[i].dist);
-	// }
-	// Geohash_Grid();
-	// canGet(); 
+    Init_Route_Table();
+    // printf("rt_counter:%d\n",rt_counter);
+    // for (int i = 0; i < rt_counter; i++)
+    // {//路由表打印
+    //     printf("NO.%d:sa=%d,ta=%d,dist=%f\n",i,route_table[i].SourAddr,route_table[i].TargAddr,route_table[i].dist);
+    // }
+	Geohash_Grid();
+	canGet(); 
+	// Door_Grid();
+	// test();
 
-	// // display_hash_table();
+	// display_hash_table();
 	
-	// /* 初始化线程池，开启THREAD_NUM条工作线程 */ 
-	// threadpool_t *pool = init(THREAD_NUM);	
-	// /* 直到接收线程停止，程序终止 */ 
-	// pthread_join(pool->rec_tid,NULL);
+	/* 初始化线程池，开启THREAD_NUM条工作线程 */ 
+	threadpool_t *pool = init(THREAD_NUM);	
+	/* 直到接收线程停止，程序终止 */ 
+	pthread_join(pool->rec_tid,NULL);
 	
 }
 
