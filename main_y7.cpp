@@ -1644,7 +1644,7 @@ int canGet(void){
 		if(rooms[rN].room_type<2){
 			printf("roomnum:%d\n",rN);
 			// rooms[rN].door_grid = (char *)malloc(3*sizeof(char));
-			CoorToBin(rooms[rN].cer_x,rooms[rN].cer_y,binStr);
+			// CoorToBin(rooms[rN].cer_x,rooms[rN].cer_y,binStr);
 			// Base32_BintoStr(binStr,rooms[rN].door_grid);
 			matA = (int *)malloc(rooms[rN].grid_num*rooms[rN].grid_num*sizeof(int));
 			printf("%d\n",rooms[rN].grid_num);
@@ -1689,20 +1689,20 @@ int canGet(void){
 
 }
 
-// void Door_Grid(void){
-// 	char binStr[GEO_BIN_LEN];
-// 	for(int i = 0; i < ROOM_QUANT; i++)
-// 	{
-// 		if (rooms[i].room_type<2)
-// 		{
-// 			rooms[i].door_grid = (char *)malloc(3*sizeof(char));
-// 			CoorToBin(rooms[i].cer_x,rooms[i].cer_y,binStr);
-// 			Base32_BintoStr(binStr,rooms[i].door_grid);
-// 			printf("%s\n",rooms[i].door_grid)			;
-// 		}
-// 	}
+void Door_Grid(void){
+	char binStr[GEO_BIN_LEN];
+	for(int i = 0; i < ROOM_QUANT; i++)
+	{
+		if (rooms[i].room_type<2)
+		{
+			// rooms[i].door_grid = (char *)malloc(3*sizeof(char));
+			CoorToBin(rooms[i].cer_x,rooms[i].cer_y,binStr);
+			Base32_BintoStr(binStr,rooms[i].door_grid);
+			printf("%s\n",rooms[i].door_grid)			;
+		}
+	}
 	
-// }
+}
 
 
 
@@ -2138,7 +2138,7 @@ int main()
     // }
 	Geohash_Grid();
 	canGet(); 
-	// Door_Grid();
+	Door_Grid();
 	// test();
 
 	// display_hash_table();
